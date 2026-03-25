@@ -30,11 +30,14 @@ struct OnboardingView: View {
 
                 stepCard(
                     title: "Automation",
-                    detail: "Finder and System Events actions will ask for permission on first use. Review the Privacy pane once and macOS handles the rest.",
+                    detail: "Ask once for Finder automation so CommandFlow appears in Privacy & Security > Automation.",
                     stateLabel: store.automationGuidanceAcknowledged ? "Ready" : "Review",
                     isComplete: store.automationGuidanceAcknowledged,
-                    primaryActionTitle: store.automationGuidanceAcknowledged ? "Reviewed" : "I Understand",
-                    primaryAction: store.markAutomationGuidanceAcknowledged,
+                    primaryActionTitle: store.automationGuidanceAcknowledged ? "Request Again" : "Request Access",
+                    primaryAction: {
+                        store.requestAutomationPrompt()
+                        store.markAutomationGuidanceAcknowledged()
+                    },
                     secondaryActionTitle: "Open Privacy",
                     secondaryAction: store.openAutomationSettings
                 )
@@ -49,6 +52,14 @@ struct OnboardingView: View {
                             .foregroundStyle(.secondary)
 
                         HStack(spacing: 10) {
+                            Button("Refresh Permissions") {
+                                store.refreshPermissions()
+                            }
+                            .buttonStyle(.plain)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 10)
+                            .background(GlassPillBackground())
+
                             Button("Later") {
                                 onDismiss()
                             }

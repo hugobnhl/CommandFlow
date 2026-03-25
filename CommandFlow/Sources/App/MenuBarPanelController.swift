@@ -55,7 +55,7 @@ final class CommandFlowAppModel {
                     if !isOnboardingPresentedManually {
                         dismissOnboarding()
                     }
-                } else {
+                } else if store.shouldShowSetupPrompt {
                     presentOnboarding()
                 }
             }
@@ -124,6 +124,7 @@ final class CommandFlowAppModel {
     func presentOnboarding(manual: Bool) {
         NSApp.activate(ignoringOtherApps: true)
         isOnboardingPresentedManually = manual
+        store.markOnboardingPresented()
 
         if onboardingWindowController == nil {
             let rootView = OnboardingView(

@@ -58,6 +58,7 @@ final class CommandFlowStore: ObservableObject {
         static let launchAtStartupEnabled = "CommandFlow.launchAtStartupEnabled"
         static let autoCopyColor = "CommandFlow.autoCopyColor"
         static let lastUsedActionID = "CommandFlow.lastUsedActionID"
+        static let hasPresentedOnboardingOnce = "CommandFlow.hasPresentedOnboardingOnce"
     }
 
     @Published var searchText = ""
@@ -116,6 +117,7 @@ final class CommandFlowStore: ObservableObject {
     @Published private(set) var lastUsedActionID: String?
     @Published private(set) var isDragInteractionActive = false
     @Published private(set) var isDragDropToolActive = false
+    @Published private(set) var hasPresentedOnboardingOnce: Bool
     @Published var automationGuidanceAcknowledged: Bool {
         didSet {
             defaults.set(automationGuidanceAcknowledged, forKey: DefaultsKey.automationGuidanceAcknowledged)
@@ -155,6 +157,10 @@ final class CommandFlowStore: ObservableObject {
         preferredBrowser = BrowserPreference(rawValue: defaults.string(forKey: DefaultsKey.preferredBrowser) ?? "") ?? .systemDefault
         preferredMailApp = MailPreference(rawValue: defaults.string(forKey: DefaultsKey.preferredMailApp) ?? "") ?? .systemDefault
         launchAtStartupEnabled = defaults.object(forKey: DefaultsKey.launchAtStartupEnabled) as? Bool ?? startupManager.isEnabled()
+        let legacyOnboardingStateExists = defaults.object(forKey: DefaultsKey.didCompleteOnboarding) != nil
+            || defaults.object(forKey: DefaultsKey.automationGuidanceAcknowledged) != nil
+        hasPresentedOnboardingOnce = defaults.object(forKey: DefaultsKey.hasPresentedOnboardingOnce) as? Bool
+            ?? legacyOnboardingStateExists
         availableBrowserPreferences = applicationRouter.availableBrowserPreferences()
         availableMailPreferences = applicationRouter.availableMailPreferences()
         lastUsedActionID = defaults.string(forKey: DefaultsKey.lastUsedActionID)
@@ -189,7 +195,7 @@ final class CommandFlowStore: ObservableObject {
     }
 
     var shouldShowSetupPrompt: Bool {
-        !permissionSnapshot.accessibilityGranted
+        !hasPresentedOnboardingOnce && !permissionSnapshot.accessibilityGranted
     }
 
     var quickActions: [SystemAction] {
@@ -326,6 +332,15 @@ final class CommandFlowStore: ObservableObject {
 
         didCompleteOnboarding = true
         defaults.set(true, forKey: DefaultsKey.didCompleteOnboarding)
+    }
+
+    func markOnboardingPresented() {
+        guard !hasPresentedOnboardingOnce else {
+            return
+        }
+
+        hasPresentedOnboardingOnce = true
+        defaults.set(true, forKey: DefaultsKey.hasPresentedOnboardingOnce)
     }
 
     func resetOnboarding() {

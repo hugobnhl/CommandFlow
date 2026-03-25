@@ -47,7 +47,7 @@ struct OnboardingView: View {
                         Text("Ready When You Are")
                             .font(.system(size: 15.5, weight: .semibold))
 
-                        Text("Setup hides as soon as Accessibility is enabled and returns automatically if access is later revoked.")
+                        Text("Use Refresh Permissions after changing access in System Settings. Refusing a prompt does not revoke an already-approved accessibility entry.")
                             .font(.system(size: 12.5, weight: .medium))
                             .foregroundStyle(.secondary)
 

@@ -137,6 +137,7 @@ final class CommandFlowStore: ObservableObject {
     private var bannerResetTask: Task<Void, Never>?
     private var rowStateResetTask: Task<Void, Never>?
     private var confirmationResetTask: Task<Void, Never>?
+    private var permissionPollingTask: Task<Void, Never>?
     private var suppressLaunchAtStartupSync = false
 
     init() {
@@ -305,20 +306,22 @@ final class CommandFlowStore: ObservableObject {
 
     func requestAccessibilityPrompt() {
         permissionCenter.requestAccessibilityPrompt()
-        schedulePermissionRefresh()
+        startPermissionPolling()
     }
 
     func openAccessibilitySettings() {
         permissionCenter.openAccessibilitySettings()
-        schedulePermissionRefresh()
+        startPermissionPolling()
     }
 
     func openAutomationSettings() {
         permissionCenter.openAutomationSettings()
+        startPermissionPolling()
     }
 
     func requestAutomationPrompt() {
         permissionCenter.requestAutomationPrompt()
+        startPermissionPolling()
     }
 
     func markAutomationGuidanceAcknowledged() {
@@ -539,6 +542,27 @@ final class CommandFlowStore: ObservableObject {
             try? await Task.sleep(for: .seconds(0.85))
             await MainActor.run {
                 self?.refreshPermissions()
+            }
+        }
+    }
+
+    private func startPermissionPolling() {
+        permissionPollingTask?.cancel()
+        permissionPollingTask = Task { [weak self] in
+            guard let self else {
+                return
+            }
+
+            for _ in 0..<20 {
+                try? await Task.sleep(for: .seconds(1))
+
+                await MainActor.run {
+                    self.refreshPermissions()
+                }
+
+                if await MainActor.run(body: { self.permissionSnapshot.accessibilityGranted }) {
+                    break
+                }
             }
         }
     }

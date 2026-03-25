@@ -163,6 +163,17 @@ final class CommandFlowAppModel {
     func dismissMenu() {
         panelController.closePanel()
     }
+
+    func relaunchApplication() {
+        guard let bundleURL = Bundle.main.bundleURL as URL? else {
+            return
+        }
+
+        let configuration = NSWorkspace.OpenConfiguration()
+        NSWorkspace.shared.openApplication(at: bundleURL, configuration: configuration) { _, _ in
+            NSApp.terminate(nil)
+        }
+    }
 }
 
 @MainActor

@@ -1,0 +1,23 @@
+included:
+  - CommandFlow/Sources
+
+disabled_rules:
+  - trailing_whitespace
+
+opt_in_rules:
+  - empty_count
+  - explicit_init
+  - sorted_imports
+
+line_length:
+  warning: 140
+  error: 180
+
+type_body_length:
+  warning: 300
+  error: 400
+
+file_length:
+  warning: 600
+  error: 800
+

@@ -42,3 +42,10 @@ Logs matter because the visible bug is often just the symptom. The log is often 
 3. Work on one feature branch at a time.
 4. Use a separate `git worktree` when you want multiple Codex windows in parallel.
 
+## GitHub setup
+
+After logging in with `gh auth login`, you can create and push the private GitHub repository with:
+
+```bash
+./scripts/create_github_repo.sh
+```

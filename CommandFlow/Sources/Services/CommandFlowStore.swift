@@ -115,6 +115,7 @@ final class CommandFlowStore: ObservableObject {
     @Published private(set) var menuBarPulseToken = 0
     @Published private(set) var lastUsedActionID: String?
     @Published private(set) var isDragInteractionActive = false
+    @Published private(set) var isDragDropToolActive = false
     @Published var automationGuidanceAcknowledged: Bool {
         didSet {
             defaults.set(automationGuidanceAcknowledged, forKey: DefaultsKey.automationGuidanceAcknowledged)
@@ -225,7 +226,7 @@ final class CommandFlowStore: ObservableObject {
     }
 
     var shouldKeepMenuPresented: Bool {
-        disableAutoClose || isDragInteractionActive
+        disableAutoClose || isDragInteractionActive || isDragDropToolActive
     }
 
     func isFavorite(_ action: SystemAction) -> Bool {
@@ -281,6 +282,13 @@ final class CommandFlowStore: ObservableObject {
         isDragInteractionActive = active
     }
 
+    func setDragDropToolActive(_ active: Bool) {
+        guard isDragDropToolActive != active else {
+            return
+        }
+        isDragDropToolActive = active
+    }
+
     func refreshPermissions() {
         permissionSnapshot = PermissionSnapshot(
             accessibilityGranted: permissionCenter.accessibilityGranted(),
@@ -301,6 +309,10 @@ final class CommandFlowStore: ObservableObject {
 
     func openAutomationSettings() {
         permissionCenter.openAutomationSettings()
+    }
+
+    func requestAutomationPrompt() {
+        permissionCenter.requestAutomationPrompt()
     }
 
     func markAutomationGuidanceAcknowledged() {

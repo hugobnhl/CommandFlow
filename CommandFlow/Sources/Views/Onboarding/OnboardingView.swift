@@ -78,11 +78,6 @@ struct OnboardingView: View {
         .onAppear {
             store.refreshPermissions()
         }
-        .onChange(of: store.shouldShowSetupPrompt) { _, shouldShow in
-            if !shouldShow {
-                onDismiss()
-            }
-        }
     }
 
     private var header: some View {

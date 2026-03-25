@@ -41,7 +41,7 @@ struct CommandFlowMenuView: View {
                 SearchFieldView(store: store, text: $store.searchText)
                 toolStrip
 
-                if store.disableAutoClose || store.isDragInteractionActive {
+                if store.disableAutoClose || store.isDragInteractionActive || store.isDragDropToolActive {
                     keepOpenBanner
                         .transition(.move(edge: .top).combined(with: .opacity))
                 }
@@ -99,6 +99,13 @@ struct CommandFlowMenuView: View {
         .animation(LiquidGlassTheme.panelSpring, value: activeTool)
         .onAppear {
             store.refreshPermissions()
+            store.setDragDropToolActive(activeTool == .dragDrop)
+        }
+        .onChange(of: activeTool) { _, tool in
+            store.setDragDropToolActive(tool == .dragDrop)
+        }
+        .onDisappear {
+            store.setDragDropToolActive(false)
         }
     }
 
@@ -170,7 +177,7 @@ struct CommandFlowMenuView: View {
             store: store,
             symbol: store.disableAutoClose ? "pin.fill" : "arrow.down.doc",
             title: store.disableAutoClose ? "Disable auto close is on" : "Drag & drop keeps the menu open",
-            detail: store.disableAutoClose ? "Click the close button when you want to dismiss CommandFlow." : "Outside clicks are ignored while the drop interaction is active."
+            detail: store.disableAutoClose ? "Click the close button when you want to dismiss CommandFlow." : "Outside clicks are ignored while the Drag & Drop tool is active."
         )
     }
 

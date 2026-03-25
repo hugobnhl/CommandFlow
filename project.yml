@@ -13,6 +13,7 @@ settings:
     GENERATE_INFOPLIST_FILE: YES
     INFOPLIST_KEY_CFBundleDisplayName: CommandFlow
     INFOPLIST_KEY_LSUIElement: YES
+    INFOPLIST_KEY_NSAppleEventsUsageDescription: CommandFlow uses Apple Events to automate Finder and System Events only when you trigger automation actions.
     CODE_SIGN_STYLE: Automatic
 targets:
   CommandFlow:
@@ -30,4 +31,3 @@ targets:
         SWIFT_EMIT_LOC_STRINGS: NO
     scheme:
       testTargets: []
-

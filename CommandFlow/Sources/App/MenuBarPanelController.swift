@@ -40,6 +40,7 @@ final class CommandFlowAppModel {
 
     private var settingsWindowController: NSWindowController?
     private var onboardingWindowController: NSWindowController?
+    private var isOnboardingPresentedManually = false
     private var cancellables = Set<AnyCancellable>()
 
     init() {
@@ -51,7 +52,9 @@ final class CommandFlowAppModel {
                 }
 
                 if snapshot.accessibilityGranted {
-                    dismissOnboarding()
+                    if !isOnboardingPresentedManually {
+                        dismissOnboarding()
+                    }
                 } else {
                     presentOnboarding()
                 }
@@ -81,7 +84,7 @@ final class CommandFlowAppModel {
             savedURLStore: savedURLStore,
             quickNoteStore: quickNoteStore,
             showOnboarding: { [weak self] in
-                self?.presentOnboarding()
+                self?.presentOnboarding(manual: true)
             }
         )
     }
@@ -115,7 +118,12 @@ final class CommandFlowAppModel {
     }
 
     func presentOnboarding() {
+        presentOnboarding(manual: false)
+    }
+
+    func presentOnboarding(manual: Bool) {
         NSApp.activate(ignoringOtherApps: true)
+        isOnboardingPresentedManually = manual
 
         if onboardingWindowController == nil {
             let rootView = OnboardingView(
@@ -147,6 +155,7 @@ final class CommandFlowAppModel {
 
     func dismissOnboarding() {
         logger.info("Closing onboarding window")
+        isOnboardingPresentedManually = false
         onboardingWindowController?.close()
     }
 
@@ -206,6 +215,10 @@ final class MenuBarPanelController: NSObject, NSWindowDelegate {
         NSApp.activate(ignoringOtherApps: true)
         panel.makeKeyAndOrderFront(nil)
         panel.orderFrontRegardless()
+        positionPanel(animated: false)
+        DispatchQueue.main.async { [weak self] in
+            self?.positionPanel(animated: false)
+        }
         statusItem.button?.state = .on
         installEventMonitors()
     }
@@ -304,6 +317,8 @@ final class MenuBarPanelController: NSObject, NSWindowDelegate {
                     return
                 }
 
+                dismissTransientPanels()
+
                 if !store.shouldKeepMenuPresented {
                     self.closePanel()
                 }
@@ -326,7 +341,7 @@ final class MenuBarPanelController: NSObject, NSWindowDelegate {
         )
 
         origin.x = min(max(origin.x, screen.minX + 10), screen.maxX - panel.frame.width - 10)
-        origin.y = min(origin.y, screen.maxY - panel.frame.height - 12)
+        origin.y = min(max(origin.y, screen.minY + 12), screen.maxY - panel.frame.height - 12)
 
         if animated {
             panel.setFrameOrigin(origin)
@@ -343,9 +358,13 @@ final class MenuBarPanelController: NSObject, NSWindowDelegate {
                 return event
             }
 
-            if event.type == .keyDown, event.keyCode == 53 {
-                self.closePanel()
-                return nil
+            if event.type == .keyDown {
+                if event.keyCode == 53 {
+                    self.closePanel()
+                    return nil
+                }
+
+                return event
             }
 
             guard self.panel?.isVisible == true else {
@@ -382,6 +401,12 @@ final class MenuBarPanelController: NSObject, NSWindowDelegate {
         if let globalEventMonitor {
             NSEvent.removeMonitor(globalEventMonitor)
             self.globalEventMonitor = nil
+        }
+    }
+
+    private func dismissTransientPanels() {
+        if NSColorPanel.sharedColorPanelExists {
+            NSColorPanel.shared.close()
         }
     }
 

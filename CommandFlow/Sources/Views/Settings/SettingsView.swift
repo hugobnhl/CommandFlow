@@ -209,9 +209,12 @@ struct SettingsView: View {
 
                 permissionRow(
                     title: "Automation",
-                    detail: "Finder and System Events prompts are handled by macOS on first use.",
-                    buttonTitle: "Open Privacy",
-                    action: store.openAutomationSettings
+                    detail: "Request access once so CommandFlow appears in Privacy & Security > Automation.",
+                    buttonTitle: "Request Access",
+                    action: {
+                        store.requestAutomationPrompt()
+                        store.markAutomationGuidanceAcknowledged()
+                    }
                 )
 
                 GlassSurface(cornerRadius: 18, padding: 14) {
@@ -228,6 +231,14 @@ struct SettingsView: View {
                             .foregroundStyle(.secondary)
                     }
                 }
+
+                Button("Open Automation in System Settings") {
+                    store.openAutomationSettings()
+                }
+                .buttonStyle(.plain)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .background(GlassPillBackground())
 
                 HStack(spacing: 10) {
                     Button("Show Setup Again") {

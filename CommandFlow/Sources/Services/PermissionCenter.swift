@@ -38,6 +38,30 @@ struct PermissionCenter: Sendable {
     }
 
     @MainActor
+    func requestAutomationPrompt() {
+        logger.info("Requesting automation permission prompt through Finder")
+
+        guard let script = NSAppleScript(source: """
+        tell application "Finder"
+            get name of startup disk
+        end tell
+        """) else {
+            logger.error("Failed to create automation prompt AppleScript")
+            return
+        }
+
+        var errorInfo: NSDictionary?
+        script.executeAndReturnError(&errorInfo)
+
+        if let errorInfo {
+            let message = errorInfo[NSAppleScript.errorMessage] as? String ?? "Unknown AppleScript error"
+            logger.warning("Automation prompt script returned: \(message, privacy: .public)")
+        } else {
+            logger.info("Automation prompt script executed successfully")
+        }
+    }
+
+    @MainActor
     private func openSettingsURLs(_ candidates: [String]) -> Bool {
         for candidate in candidates {
             if openSettingsURL(candidate) {

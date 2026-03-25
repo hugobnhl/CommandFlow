@@ -18,7 +18,26 @@ struct SavedURLsView: View {
             VStack(alignment: .leading, spacing: store.densityMetrics.stackSpacing) {
                 VStack(spacing: 8) {
                     editorField("Name", text: $draftName)
-                    editorField("https://example.com", text: $draftURL)
+                    HStack(spacing: 8) {
+                        editorField("https://example.com", text: $draftURL)
+
+                        Button("Paste") {
+                            pasteURLFromClipboard()
+                        }
+                        .buttonStyle(.plain)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.primary.opacity(0.9))
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, store.densityMetrics.controlVerticalPadding)
+                        .background(
+                            RoundedRectangle(cornerRadius: LiquidGlassTheme.controlRadius, style: .continuous)
+                                .fill(.ultraThinMaterial)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: LiquidGlassTheme.controlRadius, style: .continuous)
+                                        .fill(store.palette.accent.opacity(0.1))
+                                )
+                        )
+                    }
 
                     Button("Save URL") {
                         let added = savedURLStore.add(name: draftName, urlString: draftURL)
@@ -105,6 +124,18 @@ struct SavedURLsView: View {
                             .strokeBorder(.white.opacity(0.05), lineWidth: 0.7)
                     )
             )
+    }
+
+    private func pasteURLFromClipboard() {
+        guard let clipboardValue = NSPasteboard.general.string(forType: .string)?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+            !clipboardValue.isEmpty else {
+            store.publishError(title: "Clipboard empty", detail: "Copy a link first, then press Paste.")
+            return
+        }
+
+        draftURL = clipboardValue
+        store.publishSuccess(title: "URL pasted", detail: "The link field was filled from the clipboard.")
     }
 }
 

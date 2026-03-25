@@ -3,21 +3,17 @@ included:
 
 disabled_rules:
   - trailing_whitespace
+  - trailing_comma
+  - type_body_length
+  - file_length
+  - function_parameter_count
+  - optional_data_string_conversion
+  - for_where
 
 opt_in_rules:
   - empty_count
-  - explicit_init
   - sorted_imports
 
 line_length:
-  warning: 140
-  error: 180
-
-type_body_length:
-  warning: 300
-  error: 400
-
-file_length:
-  warning: 600
-  error: 800
-
+  warning: 180
+  error: 240

@@ -5,13 +5,14 @@ options:
 settings:
   base:
     PRODUCT_NAME: CommandFlow
-    PRODUCT_BUNDLE_IDENTIFIER: com.hugobrun.commandflow.dev
+    PRODUCT_BUNDLE_IDENTIFIER: app.getcommandflow.commandflow
     MARKETING_VERSION: 0.1.0
     CURRENT_PROJECT_VERSION: 1
     MACOSX_DEPLOYMENT_TARGET: 14.0
     SWIFT_VERSION: 5.0
     GENERATE_INFOPLIST_FILE: YES
     INFOPLIST_KEY_CFBundleDisplayName: CommandFlow
+    INFOPLIST_KEY_NSHumanReadableCopyright: Copyright 2026 CommandFlow
     INFOPLIST_KEY_LSUIElement: YES
     INFOPLIST_KEY_NSAppleEventsUsageDescription: CommandFlow uses Apple Events to automate Finder and System Events only when you trigger automation actions.
     CODE_SIGN_STYLE: Automatic
@@ -21,13 +22,27 @@ targets:
     platform: macOS
     sources:
       - path: CommandFlow/Sources
-    resources:
       - path: CommandFlow/Resources
+        buildPhase: resources
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.hugobrun.commandflow.dev
+        PRODUCT_BUNDLE_IDENTIFIER: app.getcommandflow.commandflow
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         SUPPORTS_MACCATALYST: NO
         SWIFT_EMIT_LOC_STRINGS: NO
     scheme:
-      testTargets: []
+      testTargets:
+        - CommandFlowTests
+  CommandFlowTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: CommandFlow/Tests
+    dependencies:
+      - target: CommandFlow
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_NAME: CommandFlowTests
+        PRODUCT_MODULE_NAME: CommandFlowTests
+        PRODUCT_BUNDLE_IDENTIFIER: app.getcommandflow.commandflow.tests

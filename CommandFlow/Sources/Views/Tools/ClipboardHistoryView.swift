@@ -8,13 +8,26 @@ struct ClipboardHistoryView: View {
         ToolGlassContainer(
             store: preferences,
             title: "Clipboard History",
-            detail: "The last \(store.limit) copied text snippets, ready to restore or paste again."
+            detail: store.isPersistedOnDisk
+                ? "The last \(store.limit) copied text snippets, ready to restore or paste again."
+                : "The last \(store.limit) copied text snippets, kept only for this session."
         ) {
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
                     Text("\(store.items.count) items")
                         .font(.system(size: 10.5, weight: .medium))
                         .foregroundStyle(.secondary)
+
+                    if !store.isPersistedOnDisk {
+                        Text("Session only")
+                            .font(.system(size: 10, weight: .semibold))
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(
+                                Capsule(style: .continuous)
+                                    .fill(preferences.palette.accent.opacity(0.12))
+                            )
+                    }
 
                     Spacer(minLength: 8)
 

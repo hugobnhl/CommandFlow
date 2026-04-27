@@ -6,11 +6,18 @@ struct CommandFlowMenuView: View {
     @ObservedObject var savedURLStore: SavedURLStore
     @ObservedObject var quickNoteStore: QuickNoteStore
     @ObservedObject var dragDropStore: DragDropStore
+    @ObservedObject var updateService: AppUpdateService
     let onOpenSettings: () -> Void
+    let onRelaunchApplication: () -> Void
     let onOpenOnboarding: () -> Void
     let onDismissMenu: () -> Void
 
     @State private var activeTool: MenuToolPanel?
+    @State private var isKeyboardSoundPopoverPresented = false
+
+    private var toolStripColumns: [GridItem] {
+        Array(repeating: GridItem(.flexible(minimum: 0, maximum: .infinity), spacing: 8), count: 3)
+    }
 
     private var visibleActions: [SystemAction] {
         store.groupedActions.flatMap(\.actions)
@@ -31,6 +38,40 @@ struct CommandFlowMenuView: View {
         }
     }
 
+    private var keyboardSoundEnabledBinding: Binding<Bool> {
+        Binding(
+            get: { store.keyboardSoundEnabled },
+            set: { store.setKeyboardSoundEnabled($0) }
+        )
+    }
+
+    private var keyboardSoundVolumeBinding: Binding<Double> {
+        Binding(
+            get: { store.keyboardSoundVolume },
+            set: { store.setKeyboardSoundVolume($0) }
+        )
+    }
+
+    private var keyboardSoundStatusText: String {
+        if !store.keyboardSoundEnabled {
+            return "Off"
+        }
+
+        return store.permissionSnapshot.inputMonitoringGranted ? "On" : "Pending"
+    }
+
+    private var keyboardSoundDetailText: String {
+        if store.permissionSnapshot.inputMonitoringGranted {
+            return "Mechanical feedback stays mixed behind your audio."
+        }
+
+        if store.keyboardSoundEnabled {
+            return "Keyboard sound is enabled, but macOS still has to confirm Input Monitoring before playback can start."
+        }
+
+        return "Input Monitoring is required for global keyboard feedback. Toggle once to request access, then update permissions in Settings."
+    }
+
     var body: some View {
         ZStack {
             Color.clear
@@ -48,6 +89,11 @@ struct CommandFlowMenuView: View {
 
                 if store.shouldShowSetupPrompt {
                     setupPrompt
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                }
+
+                if let availableRelease = updateService.availableRelease {
+                    updatePrompt(for: availableRelease)
                         .transition(.move(edge: .top).combined(with: .opacity))
                 }
 
@@ -103,9 +149,13 @@ struct CommandFlowMenuView: View {
         }
         .onChange(of: activeTool) { _, tool in
             store.setDragDropToolActive(tool == .dragDrop)
+            if tool != nil {
+                isKeyboardSoundPopoverPresented = false
+            }
         }
         .onDisappear {
             store.setDragDropToolActive(false)
+            isKeyboardSoundPopoverPresented = false
         }
     }
 
@@ -148,6 +198,12 @@ struct CommandFlowMenuView: View {
                 }
                 .help("Open settings")
 
+            toolbarButton(systemImage: "arrow.clockwise", tint: store.palette.accentSecondary)
+                .onTapGesture {
+                    onRelaunchApplication()
+                }
+                .help("Restart CommandFlow")
+
             toolbarButton(systemImage: "xmark", tint: .secondary)
                 .onTapGesture {
                     onDismissMenu()
@@ -158,17 +214,80 @@ struct CommandFlowMenuView: View {
     }
 
     private var toolStrip: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
+        VStack(alignment: .leading, spacing: 8) {
+            LazyVGrid(columns: toolStripColumns, spacing: 8) {
                 ForEach(MenuToolPanel.allCases) { tool in
                     ToolStripButton(store: store, tool: tool, isActive: activeTool == tool) {
                         withAnimation(LiquidGlassTheme.panelSpring) {
+                            isKeyboardSoundPopoverPresented = false
                             activeTool = activeTool == tool ? nil : tool
                         }
                     }
                 }
+
+                KeyboardSoundStripButton(
+                    store: store,
+                    isActive: isKeyboardSoundPopoverPresented,
+                    isEnabled: store.keyboardSoundEnabled
+                ) {
+                    withAnimation(LiquidGlassTheme.panelSpring) {
+                        isKeyboardSoundPopoverPresented.toggle()
+                    }
+                }
             }
             .padding(.vertical, 1)
+
+            if isKeyboardSoundPopoverPresented {
+                HStack {
+                    Spacer(minLength: 0)
+                    keyboardSoundPopover
+                        .frame(width: 246)
+                }
+                .transition(.move(edge: .top).combined(with: .opacity))
+            }
+        }
+    }
+
+    private var keyboardSoundPopover: some View {
+        GlassSurface(cornerRadius: 18, padding: 14, glowColor: store.palette.glow) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Keyboard Sound")
+                            .font(.system(size: 12.5, weight: .semibold))
+
+                        Text(keyboardSoundStatusText)
+                            .font(.system(size: 10.5, weight: .medium))
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Spacer(minLength: 8)
+
+                    Toggle("", isOn: keyboardSoundEnabledBinding)
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                }
+
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Text("Volume")
+                            .font(.system(size: 11.5, weight: .semibold))
+
+                        Spacer(minLength: 8)
+
+                        Text("\(Int(store.keyboardSoundVolume * 100))%")
+                            .font(.system(size: 10.5, weight: .medium, design: .rounded))
+                            .foregroundStyle(.secondary)
+                    }
+
+                    NativeGlassSlider(value: keyboardSoundVolumeBinding, palette: store.palette)
+                }
+
+                Text(keyboardSoundDetailText)
+                    .font(.system(size: 10.5, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 
@@ -199,6 +318,35 @@ struct CommandFlowMenuView: View {
             title: banner.title,
             detail: banner.detail
         )
+    }
+
+    private func updatePrompt(for release: AppUpdateRelease) -> some View {
+        GlassInlineNote(
+            store: store,
+            symbol: "arrow.down.circle",
+            title: "Update available",
+            detail: updatePromptDetail(for: release)
+        ) {
+            if case .downloaded = updateService.downloadState {
+                Button("Reveal") {
+                    updateService.revealDownloadedFile()
+                }
+                .buttonStyle(.plain)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(store.palette.accentSecondary)
+            } else {
+                Button(updatePromptButtonTitle) {
+                    Task {
+                        await updateService.downloadLatestRelease()
+                    }
+                }
+                .buttonStyle(.plain)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(store.palette.accentSecondary)
+                .disabled(isDownloadingUpdate)
+                .opacity(isDownloadingUpdate ? 0.6 : 1)
+            }
+        }
     }
 
     private var quickAccessSection: some View {
@@ -243,6 +391,8 @@ struct CommandFlowMenuView: View {
         switch tool {
         case .color:
             ColorPaletteView(store: store)
+        case .focusNoise:
+            FocusNoiseView(store: store)
         case .dragDrop:
             DragDropView(store: store, dragDropStore: dragDropStore)
         case .clipboard:
@@ -301,6 +451,48 @@ struct CommandFlowMenuView: View {
             return "xmark"
         }
     }
+
+    private func updatePromptDetail(for release: AppUpdateRelease) -> String {
+        var message = "CommandFlow \(release.version) is ready."
+
+        if let asset = release.preferredAsset {
+            message += " Download the latest \(asset.kindLabel) to Downloads."
+        }
+
+        switch updateService.downloadState {
+        case let .downloading(filename):
+            message = "Downloading \(filename) to Downloads."
+        case let .downloaded(fileURL):
+            message = "Downloaded \(fileURL.lastPathComponent). Reveal it and replace the app."
+        case let .failed(error):
+            message = "Download failed. \(error)"
+        case .idle:
+            break
+        }
+
+        return message
+    }
+
+    private var updatePromptButtonTitle: String {
+        switch updateService.downloadState {
+        case .downloading:
+            return "Downloading"
+        case .downloaded:
+            return "Reveal"
+        case .failed:
+            return "Retry"
+        case .idle:
+            return "Download"
+        }
+    }
+
+    private var isDownloadingUpdate: Bool {
+        if case .downloading = updateService.downloadState {
+            return true
+        }
+
+        return false
+    }
 }
 
 private struct MenuCategorySection: Identifiable {
@@ -357,10 +549,11 @@ private enum MenuPresentationCategory: String, Identifiable {
 
 private enum MenuToolPanel: String, CaseIterable, Identifiable {
     case color = "Color"
+    case focusNoise = "Focus Noise"
     case dragDrop = "Drop"
     case clipboard = "Clipboard"
     case savedURLs = "Saved URLs"
-    case quickNote = "QuickNote"
+    case quickNote = "Notes"
 
     var id: String { rawValue }
 
@@ -368,6 +561,8 @@ private enum MenuToolPanel: String, CaseIterable, Identifiable {
         switch self {
         case .color:
             return "eyedropper.halffull"
+        case .focusNoise:
+            return "speaker.wave.3"
         case .dragDrop:
             return "square.and.arrow.down"
         case .clipboard:
@@ -478,7 +673,11 @@ private struct GlassInlineNote<Trailing: View>: View {
                 .fill(.ultraThinMaterial)
                 .overlay(
                     RoundedRectangle(cornerRadius: LiquidGlassTheme.controlRadius, style: .continuous)
-                        .fill(store.palette.accent.opacity(0.08))
+                        .fill(store.palette.accent.opacity(0.06))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: LiquidGlassTheme.controlRadius, style: .continuous)
+                        .strokeBorder(.white.opacity(0.08), lineWidth: 0.7)
                 )
         )
     }
@@ -491,6 +690,10 @@ private struct QuickAccessOrb: View {
     let perform: () -> Void
 
     @State private var isHovered = false
+
+    private var actionIsDisabled: Bool {
+        !store.canPerform(action)
+    }
 
     var body: some View {
         Button(action: perform) {
@@ -506,7 +709,7 @@ private struct QuickAccessOrb: View {
                             .font(.system(size: 12.5, weight: .semibold))
                             .foregroundStyle(.primary.opacity(0.92))
                     }
-                    .frame(width: 32, height: 32)
+                .frame(width: 32, height: 32)
 
                 Text(action.name)
                     .font(.system(size: 9.5, weight: .medium))
@@ -518,12 +721,14 @@ private struct QuickAccessOrb: View {
             .scaleEffect(isHovered ? 1.025 : 1.0)
         }
         .buttonStyle(.plain)
+        .disabled(actionIsDisabled)
+        .opacity(actionIsDisabled ? 0.46 : 1.0)
         .onHover { hovering in
             withAnimation(LiquidGlassTheme.rowSpring) {
                 isHovered = hovering
             }
         }
-        .help(action.name)
+        .help(store.displayName(for: action))
     }
 
     private var statusSymbol: String {
@@ -558,10 +763,13 @@ private struct ToolStripButton: View {
 
                 Text(tool.rawValue)
                     .font(.system(size: 11.5, weight: .semibold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.82)
             }
             .foregroundStyle(.primary.opacity(0.9))
             .padding(.horizontal, 12)
             .padding(.vertical, store.densityMetrics.toolButtonVerticalPadding)
+            .frame(maxWidth: .infinity)
             .background(buttonBackground)
             .scaleEffect(isHovered || isActive ? 1.01 : 1.0)
         }
@@ -583,6 +791,55 @@ private struct ToolStripButton: View {
             .overlay(
                 RoundedRectangle(cornerRadius: LiquidGlassTheme.controlRadius, style: .continuous)
                     .strokeBorder(.white.opacity(isActive ? 0.08 : 0.04), lineWidth: 0.7)
+            )
+    }
+}
+
+private struct KeyboardSoundStripButton: View {
+    @ObservedObject var store: CommandFlowStore
+    let isActive: Bool
+    let isEnabled: Bool
+    let action: () -> Void
+
+    @State private var isHovered = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 7) {
+                Image(systemName: "keyboard")
+                    .font(.system(size: 11, weight: .semibold))
+
+                Text("Keyboard")
+                    .font(.system(size: 11.5, weight: .semibold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.82)
+            }
+            .foregroundStyle(.primary.opacity(0.9))
+            .padding(.horizontal, 12)
+            .padding(.vertical, store.densityMetrics.toolButtonVerticalPadding)
+            .frame(maxWidth: .infinity)
+            .background(buttonBackground)
+            .scaleEffect(isHovered || isActive ? 1.01 : 1.0)
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering in
+            withAnimation(.easeOut(duration: 0.16)) {
+                isHovered = hovering
+            }
+        }
+        .help("Keyboard sound")
+    }
+
+    private var buttonBackground: some View {
+        RoundedRectangle(cornerRadius: LiquidGlassTheme.controlRadius, style: .continuous)
+            .fill(.ultraThinMaterial)
+            .overlay(
+                RoundedRectangle(cornerRadius: LiquidGlassTheme.controlRadius, style: .continuous)
+                    .fill((isActive || isEnabled) ? store.palette.accent.opacity(0.14) : .white.opacity(isHovered ? 0.04 : 0.02))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: LiquidGlassTheme.controlRadius, style: .continuous)
+                    .strokeBorder(.white.opacity((isActive || isEnabled) ? 0.08 : 0.04), lineWidth: 0.7)
             )
     }
 }

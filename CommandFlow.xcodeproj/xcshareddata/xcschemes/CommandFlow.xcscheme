@@ -39,6 +39,17 @@
          </BuildableReference>
       </MacroExpansion>
       <Testables>
+         <TestableReference
+            skipped = "NO"
+            parallelizable = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "528FB0C391728BB42C1A8993"
+               BuildableName = "CommandFlowTests.xctest"
+               BlueprintName = "CommandFlowTests"
+               ReferencedContainer = "container:CommandFlow.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
       </Testables>
       <CommandLineArguments>
       </CommandLineArguments>

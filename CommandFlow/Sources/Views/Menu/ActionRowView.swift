@@ -11,15 +11,20 @@ struct ActionRowView: View {
         store.rowStatus(for: action)
     }
 
-    private var disabled: Bool {
+    private var disabledByPreference: Bool {
         store.isDisabled(action)
     }
 
-    private var shortcutText: String? {
-        guard let shortcut = action.shortcut?.trimmingCharacters(in: .whitespacesAndNewlines), !shortcut.isEmpty else {
-            return nil
-        }
-        return shortcut
+    private var unavailable: Bool {
+        store.isUnavailable(action)
+    }
+
+    private var actionIsDisabled: Bool {
+        disabledByPreference || unavailable
+    }
+
+    private var subtitleText: String? {
+        store.secondaryLabel(for: action)
     }
 
     var body: some View {
@@ -37,7 +42,7 @@ struct ActionRowView: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .disabled(disabled)
+            .disabled(actionIsDisabled)
 
             HStack(spacing: 5) {
                 Button {
@@ -71,7 +76,7 @@ struct ActionRowView: View {
                 }
                 .buttonStyle(.plain)
                 .scaleEffect(isPressingPlay ? 0.95 : 1.0)
-                .disabled(disabled)
+                .disabled(actionIsDisabled)
                 .pressEvents {
                     withAnimation(.easeOut(duration: 0.12)) {
                         isPressingPlay = true
@@ -90,7 +95,7 @@ struct ActionRowView: View {
         .background(rowBackground)
         .contentShape(RoundedRectangle(cornerRadius: LiquidGlassTheme.rowRadius, style: .continuous))
         .scaleEffect(isHovered ? 1.004 : 1.0)
-        .opacity(disabled ? 0.48 : 1.0)
+        .opacity(actionIsDisabled ? 0.48 : 1.0)
         .onHover { hovering in
             withAnimation(LiquidGlassTheme.rowSpring) {
                 isHovered = hovering
@@ -117,16 +122,16 @@ struct ActionRowView: View {
     }
 
     private var textBlock: some View {
-        VStack(alignment: .leading, spacing: 1.5) {
-            Text(action.name)
+            VStack(alignment: .leading, spacing: 1.5) {
+            Text(store.displayName(for: action))
                 .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(.primary)
                 .lineLimit(1)
 
-            if let shortcutText {
-                Text(shortcutText)
+            if let subtitleText {
+                Text(subtitleText)
                     .font(.system(size: 10.5, weight: .medium, design: .rounded))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(unavailable ? Color.secondary.opacity(0.9) : Color.secondary)
                     .lineLimit(1)
                     .textSelection(.disabled)
             }
@@ -138,9 +143,9 @@ struct ActionRowView: View {
     private var playGlyph: some View {
         switch status {
         case .idle:
-            Image(systemName: disabled ? "slash.circle" : "play.fill")
+            Image(systemName: actionIsDisabled ? "slash.circle" : "play.fill")
                 .font(.system(size: 9.5, weight: .bold))
-                .foregroundStyle(disabled ? Color.secondary.opacity(0.6) : Color.primary.opacity(0.92))
+                .foregroundStyle(actionIsDisabled ? Color.secondary.opacity(0.6) : Color.primary.opacity(0.92))
         case .running:
             ProgressView()
                 .controlSize(.small)

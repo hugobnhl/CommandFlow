@@ -6,10 +6,9 @@ struct DragDropView: View {
     @ObservedObject var store: CommandFlowStore
     @ObservedObject var dragDropStore: DragDropStore
 
-    @State private var selectedFileID: DroppedFileItem.ID?
+    @State private var focusedFileID: DroppedFileItem.ID?
+    @State private var selectedFileIDs: Set<DroppedFileItem.ID> = []
     @State private var isTargeted = false
-    @State private var panelBounds: CGRect = .zero
-    @State private var dragOffsets: [DroppedFileItem.ID: CGSize] = [:]
 
     private let gridColumns = Array(repeating: GridItem(.flexible(), spacing: 10), count: 5)
 
@@ -17,20 +16,53 @@ struct DragDropView: View {
         Array(dragDropStore.items.reversed())
     }
 
-    private var selectedItem: DroppedFileItem? {
-        if let selectedFileID,
-           let selected = dragDropStore.items.first(where: { $0.id == selectedFileID }) {
-            return selected
+    private var focusedItem: DroppedFileItem? {
+        if let focusedFileID,
+           let focused = dragDropStore.items.first(where: { $0.id == focusedFileID }) {
+            return focused
         }
 
         return dragDropStore.items.last
+    }
+
+    private var selectedItems: [DroppedFileItem] {
+        let explicitlySelected = displayedItems.filter { selectedFileIDs.contains($0.id) }
+        if !explicitlySelected.isEmpty {
+            return explicitlySelected
+        }
+
+        if let focusedItem {
+            return [focusedItem]
+        }
+
+        return []
+    }
+
+    private var selectionSummaryText: String? {
+        guard selectedItems.count > 1 else {
+            return nil
+        }
+
+        return "\(selectedItems.count) files selected"
+    }
+
+    private var selectedFileCountText: String {
+        if selectedItems.isEmpty {
+            return "No file selected"
+        }
+
+        if selectedItems.count == 1 {
+            return "1 file ready"
+        }
+
+        return "\(selectedItems.count) files ready"
     }
 
     var body: some View {
         ToolGlassContainer(
             store: store,
             title: "Drag & Drop",
-            detail: "Keep up to 10 files handy, preview them, reveal them, or remove them one by one."
+            detail: "Drop files into the panel, check several to move them together, then drag them out to Finder or another app."
         ) {
             VStack(alignment: .leading, spacing: store.densityMetrics.stackSpacing) {
                 if store.shouldKeepMenuPresented {
@@ -39,22 +71,12 @@ struct DragDropView: View {
 
                 dropZone
 
-                if let selectedItem {
-                    selectedFileDetails(for: selectedItem)
+                if let focusedItem {
+                    selectedFileDetails(for: focusedItem)
                 }
 
                 toolActions
             }
-            .coordinateSpace(name: "drag-drop-root")
-            .background(
-                GeometryReader { proxy in
-                    Color.clear.preference(
-                        key: DragDropPanelBoundsPreferenceKey.self,
-                        value: proxy.frame(in: .named("drag-drop-root"))
-                    )
-                }
-            )
-            .onPreferenceChange(DragDropPanelBoundsPreferenceKey.self) { panelBounds = $0 }
             .onChange(of: isTargeted) { _, targeted in
                 store.setDragInteractionActive(targeted)
                 dragDropStore.setInteractionActive(targeted)
@@ -116,7 +138,7 @@ struct DragDropView: View {
                     populatedDropZoneContent
                 }
             }
-            .frame(height: displayedItems.isEmpty ? 134 : 228)
+            .frame(height: displayedItems.isEmpty ? 134 : 252)
             .onDrop(of: [UTType.fileURL.identifier], isTargeted: $isTargeted, perform: handleDrop(providers:))
     }
 
@@ -138,50 +160,64 @@ struct DragDropView: View {
     private var populatedDropZoneContent: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text("Drop Another File")
-                    .font(.system(size: 11.5, weight: .semibold))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Drag files out of CommandFlow")
+                        .font(.system(size: 11.5, weight: .semibold))
+
+                    Text(selectedFileCountText)
+                        .font(.system(size: 10.5, weight: .medium))
+                        .foregroundStyle(.secondary)
+                }
 
                 Spacer(minLength: 12)
 
-                Text("\(dragDropStore.items.count)/10")
-                    .font(.system(size: 10.5, weight: .semibold))
-                    .foregroundStyle(.secondary)
+                if let selectionSummaryText {
+                    Text(selectionSummaryText)
+                        .font(.system(size: 10.5, weight: .semibold, design: .rounded))
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text("\(dragDropStore.items.count)/10")
+                        .font(.system(size: 10.5, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                }
             }
 
             LazyVGrid(columns: gridColumns, spacing: 10) {
                 ForEach(displayedItems) { item in
                     DragDropLibraryItemView(
                         item: item,
-                        isSelected: selectedItem?.id == item.id,
+                        isSelected: selectedFileIDs.contains(item.id),
                         palette: store.palette,
-                        offset: dragOffsets[item.id] ?? .zero,
-                        onTap: {
-                            selectedFileID = item.id
+                        dragItemsProvider: { dragItems(for: item) },
+                        onSelect: {
+                            focusedFileID = item.id
+                        },
+                        onToggleSelection: {
+                            toggleSelection(for: item)
                         },
                         onDelete: {
                             remove(item)
-                        },
-                        onDragChanged: { value in
-                            selectedFileID = item.id
-                            dragOffsets[item.id] = value.translation
-                        },
-                        onDragEnded: { value in
-                            let shouldRemove = !panelBounds.insetBy(dx: -10, dy: -10).contains(value.location)
-                            withAnimation(LiquidGlassTheme.rowSpring) {
-                                dragOffsets[item.id] = .zero
-                            }
-
-                            if shouldRemove {
-                                remove(item)
-                            }
                         }
                     )
                 }
             }
 
-            Text("Drag an icon outside this panel or press x to remove it.")
-                .font(.system(size: 10.5, weight: .medium))
-                .foregroundStyle(.secondary)
+            if !selectedItems.isEmpty {
+                HStack(spacing: 8) {
+                    Text("Check several tiles to drag them together.")
+                        .font(.system(size: 10.5, weight: .medium))
+                        .foregroundStyle(.secondary)
+
+                    Spacer(minLength: 8)
+
+                    Button("Clear selection") {
+                        selectedFileIDs.removeAll()
+                    }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 10.5, weight: .semibold))
+                    .foregroundStyle(store.palette.accentSecondary)
+                }
+            }
         }
         .padding(12)
     }
@@ -202,47 +238,97 @@ struct DragDropView: View {
     private var toolActions: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
-                toolButton("Copy selected path", enabled: selectedItem != nil) {
-                    if dragDropStore.copyFilePath(for: selectedItem), let selectedItem {
-                        store.publishSuccess(title: "Path copied", detail: selectedItem.name)
+                toolButton("Copy path", enabled: !selectedItems.isEmpty) {
+                    if dragDropStore.copyFilePaths(for: selectedItems), let focusedItem {
+                        store.publishSuccess(
+                            title: selectedItems.count == 1 ? "Path copied" : "Paths copied",
+                            detail: focusedItem.name
+                        )
                     }
                 }
 
-                toolButton("Preview", enabled: selectedItem != nil) {
-                    if dragDropStore.previewFile(selectedItem), let selectedItem {
-                        store.publishSuccess(title: "Preview opened", detail: selectedItem.name)
+                toolButton("Quick Look", enabled: !selectedItems.isEmpty) {
+                    if dragDropStore.previewFiles(selectedItems), let focusedItem {
+                        store.publishSuccess(title: "Quick Look opened", detail: focusedItem.name)
                     }
                 }
             }
 
             HStack(spacing: 8) {
-                toolButton("Reveal", enabled: selectedItem != nil) {
-                    if dragDropStore.revealFile(selectedItem), let selectedItem {
-                        store.publishSuccess(title: "Revealed in Finder", detail: selectedItem.name)
+                toolButton("Reveal", enabled: !selectedItems.isEmpty) {
+                    if dragDropStore.revealFiles(selectedItems), let focusedItem {
+                        store.publishSuccess(title: "Revealed in Finder", detail: focusedItem.name)
                     }
                 }
 
-                toolButton("Open", enabled: selectedItem != nil) {
-                    if dragDropStore.openFile(selectedItem), let selectedItem {
-                        store.publishSuccess(title: "File opened", detail: selectedItem.name)
+                toolButton("Open", enabled: !selectedItems.isEmpty) {
+                    if dragDropStore.openFiles(selectedItems), let focusedItem {
+                        store.publishSuccess(title: "File opened", detail: focusedItem.name)
+                    }
+                }
+            }
+
+            HStack(spacing: 8) {
+                toolButton("Remove", enabled: !selectedItems.isEmpty) {
+                    removeSelectedItems()
+                }
+
+                toolButton("Copy latest", enabled: dragDropStore.latestDroppedFileURL != nil) {
+                    if dragDropStore.copyLatestFilePath() {
+                        store.publishSuccess(title: "Latest path copied", detail: dragDropStore.latestDroppedFileURL?.lastPathComponent ?? "File")
                     }
                 }
             }
         }
     }
 
+    private func dragItems(for item: DroppedFileItem) -> [URL] {
+        let selected = selectedItems
+        if selected.count > 1, selected.contains(where: { $0.id == item.id }) {
+            return selected.map(\.url)
+        }
+
+        return [item.url]
+    }
+
+    private func toggleSelection(for item: DroppedFileItem) {
+        if selectedFileIDs.contains(item.id) {
+            selectedFileIDs.remove(item.id)
+        } else {
+            selectedFileIDs.insert(item.id)
+            focusedFileID = item.id
+        }
+    }
+
     private func syncSelection() {
-        if let selectedFileID,
-           dragDropStore.items.contains(where: { $0.id == selectedFileID }) {
+        let availableIDs = Set(dragDropStore.items.map(\.id))
+        selectedFileIDs = selectedFileIDs.intersection(availableIDs)
+
+        if let focusedFileID, availableIDs.contains(focusedFileID) {
             return
         }
 
-        selectedFileID = dragDropStore.items.last?.id
+        focusedFileID = dragDropStore.items.last?.id
     }
 
     private func remove(_ item: DroppedFileItem) {
         dragDropStore.remove(item)
+        selectedFileIDs.remove(item.id)
         store.publishSuccess(title: "File removed", detail: item.name)
+        syncSelection()
+    }
+
+    private func removeSelectedItems() {
+        let itemsToRemove = selectedItems
+        guard !itemsToRemove.isEmpty else {
+            return
+        }
+
+        dragDropStore.remove(itemsToRemove)
+        selectedFileIDs.subtract(Set(itemsToRemove.map(\.id)))
+        if let focusedItem = itemsToRemove.first {
+            store.publishSuccess(title: "File removed", detail: focusedItem.name)
+        }
         syncSelection()
     }
 
@@ -261,7 +347,8 @@ struct DragDropView: View {
                 DispatchQueue.main.async {
                     withAnimation(LiquidGlassTheme.panelSpring) {
                         let droppedItem = dragDropStore.registerDroppedFile(fileURL)
-                        selectedFileID = droppedItem.id
+                        focusedFileID = droppedItem.id
+                        selectedFileIDs = [droppedItem.id]
                         store.setDragInteractionActive(false)
                     }
 
@@ -313,11 +400,10 @@ private struct DragDropLibraryItemView: View {
     let item: DroppedFileItem
     let isSelected: Bool
     let palette: AccentPalette
-    let offset: CGSize
-    let onTap: () -> Void
+    let dragItemsProvider: () -> [URL]
+    let onSelect: () -> Void
+    let onToggleSelection: () -> Void
     let onDelete: () -> Void
-    let onDragChanged: (DragGesture.Value) -> Void
-    let onDragEnded: (DragGesture.Value) -> Void
 
     @State private var isHovered = false
 
@@ -328,7 +414,7 @@ private struct DragDropLibraryItemView: View {
     }
 
     var body: some View {
-        ZStack(alignment: .topTrailing) {
+        ZStack {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .fill(.ultraThinMaterial)
                 .overlay(
@@ -340,46 +426,59 @@ private struct DragDropLibraryItemView: View {
                         .strokeBorder(isSelected ? palette.accent.opacity(0.34) : .white.opacity(0.05), lineWidth: 0.8)
                 )
 
-            Image(nsImage: iconImage)
-                .resizable()
-                .scaledToFit()
-                .frame(width: 38, height: 38)
-                .padding(10)
+            VStack(spacing: 6) {
+                Image(nsImage: iconImage)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 30, height: 30)
+                    .padding(.top, 6)
 
-            Button {
-                onDelete()
-            } label: {
-                Image(systemName: "xmark.circle.fill")
-                    .font(.system(size: 12, weight: .bold))
-                    .foregroundStyle(.white.opacity(0.95))
-                    .shadow(radius: 2)
+                Text(item.name)
+                    .font(.system(size: 9.5, weight: .medium))
+                    .foregroundStyle(.primary.opacity(0.88))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .frame(maxWidth: .infinity)
+                    .padding(.horizontal, 4)
+                    .padding(.bottom, 4)
             }
-            .buttonStyle(.plain)
-            .padding(6)
-            .opacity(isHovered || isSelected ? 1 : 0.62)
+
+            FileDragSourceView(
+                dragItemsProvider: dragItemsProvider,
+                onTap: onSelect,
+                dragPreviewImageProvider: { iconImage },
+                excludedTopLeadingSize: CGSize(width: 22, height: 22),
+                excludedTopTrailingSize: CGSize(width: 22, height: 22)
+            )
+
+            HStack {
+                Button(action: onToggleSelection) {
+                    Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(isSelected ? palette.accentSecondary : .secondary.opacity(0.7))
+                }
+                .buttonStyle(.plain)
+
+                Spacer(minLength: 0)
+
+                Button(action: onDelete) {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(.white.opacity(0.95))
+                        .shadow(radius: 2)
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(5)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
-        .frame(width: 58, height: 58)
+        .frame(width: 66, height: 78)
         .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .offset(offset)
-        .onTapGesture(perform: onTap)
         .onHover { hovering in
             withAnimation(.easeOut(duration: 0.16)) {
                 isHovered = hovering
             }
         }
-        .gesture(
-            DragGesture(minimumDistance: 6, coordinateSpace: .named("drag-drop-root"))
-                .onChanged(onDragChanged)
-                .onEnded(onDragEnded)
-        )
         .help(item.name)
-    }
-}
-
-private struct DragDropPanelBoundsPreferenceKey: PreferenceKey {
-    static var defaultValue: CGRect = .zero
-
-    static func reduce(value: inout CGRect, nextValue: () -> CGRect) {
-        value = nextValue()
     }
 }

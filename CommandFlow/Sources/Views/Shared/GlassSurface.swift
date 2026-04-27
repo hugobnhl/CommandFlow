@@ -50,6 +50,9 @@ struct FloatingWindowConfigurator: NSViewRepresentable {
         window.isMovableByWindowBackground = false
         window.contentView?.wantsLayer = true
         window.contentView?.layer?.backgroundColor = NSColor.clear.cgColor
+        window.contentView?.layer?.cornerCurve = .continuous
+        window.contentView?.superview?.wantsLayer = true
+        window.contentView?.superview?.layer?.backgroundColor = NSColor.clear.cgColor
     }
 }
 
@@ -74,21 +77,21 @@ struct LiquidGlassBackdrop: View {
     var body: some View {
         Color.clear
             .overlay {
-                VisualEffectBlur(material: .hudWindow, blendingMode: .behindWindow)
+                VisualEffectBlur(material: .underWindowBackground, blendingMode: .behindWindow)
                     .clipShape(RoundedRectangle(cornerRadius: LiquidGlassTheme.panelRadius, style: .continuous))
             }
             .overlay {
                 RoundedRectangle(cornerRadius: LiquidGlassTheme.panelRadius, style: .continuous)
                     .fill(.ultraThinMaterial)
-                    .opacity(0.78)
+                    .opacity(0.42)
             }
             .overlay {
                 RoundedRectangle(cornerRadius: LiquidGlassTheme.panelRadius, style: .continuous)
                     .fill(
                         LinearGradient(
                             colors: [
-                                .white.opacity(0.12),
-                                .white.opacity(0.035),
+                                .white.opacity(0.16),
+                                .white.opacity(0.05),
                                 .clear,
                             ],
                             startPoint: .topLeading,
@@ -102,8 +105,8 @@ struct LiquidGlassBackdrop: View {
                     .fill(
                         LinearGradient(
                             colors: [
-                                .white.opacity(0.18),
-                                .white.opacity(0.03),
+                                .white.opacity(0.22),
+                                .white.opacity(0.04),
                                 .clear,
                             ],
                             startPoint: .topLeading,
@@ -113,6 +116,26 @@ struct LiquidGlassBackdrop: View {
                     .frame(width: 220, height: 100)
                     .blur(radius: 12)
                     .offset(x: -18, y: -18)
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: LiquidGlassTheme.panelRadius, style: .continuous)
+                    .strokeBorder(.white.opacity(0.11), lineWidth: 0.8)
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: LiquidGlassTheme.panelRadius, style: .continuous)
+                    .strokeBorder(.black.opacity(0.12), lineWidth: 1.2)
+                    .blur(radius: 2)
+                    .offset(y: 1)
+                    .mask(
+                        RoundedRectangle(cornerRadius: LiquidGlassTheme.panelRadius, style: .continuous)
+                            .fill(
+                                LinearGradient(
+                                    colors: [.clear, .black, .black],
+                                    startPoint: .top,
+                                    endPoint: .bottom
+                                )
+                            )
+                    )
             }
         .clipShape(RoundedRectangle(cornerRadius: LiquidGlassTheme.panelRadius, style: .continuous))
         .background(Color.clear)
@@ -144,20 +167,20 @@ struct GlassSurface<Content: View>: View {
             .background {
                 Color.clear
                     .overlay {
-                        VisualEffectBlur(material: .hudWindow, blendingMode: .withinWindow)
+                        VisualEffectBlur(material: .menu, blendingMode: .withinWindow)
                             .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
                     }
                     .overlay {
                         RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                             .fill(.ultraThinMaterial)
-                            .opacity(0.68)
+                            .opacity(0.36)
                     }
                     .overlay {
                         RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                             .fill(
                                 LinearGradient(
                                     colors: [
-                                        .white.opacity(0.08),
+                                        .white.opacity(0.13),
                                         .clear,
                                     ],
                                     startPoint: .topLeading,
@@ -176,6 +199,10 @@ struct GlassSurface<Content: View>: View {
                             )
                         }
                     }
+                    .overlay {
+                        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                            .strokeBorder(.white.opacity(0.08), lineWidth: 0.8)
+                    }
             }
             .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
     }
@@ -188,11 +215,15 @@ struct GlassPillBackground: View {
             .overlay(
                 Capsule(style: .continuous)
                     .fill(.ultraThinMaterial)
-                    .opacity(0.72)
+                    .opacity(0.4)
             )
             .overlay(
                 Capsule(style: .continuous)
-                    .fill(.white.opacity(0.035))
+                    .fill(.white.opacity(0.05))
+            )
+            .overlay(
+                Capsule(style: .continuous)
+                    .strokeBorder(.white.opacity(0.08), lineWidth: 0.75)
             )
     }
 }

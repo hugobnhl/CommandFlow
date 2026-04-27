@@ -6,8 +6,8 @@ enum LiquidGlassTheme {
     static let controlRadius: CGFloat = 14
     static let rowRadius: CGFloat = 14
     static let chipRadius: CGFloat = 16
-    static let menuWidth: CGFloat = 430
-    static let menuHeight: CGFloat = 640
+    static let menuWidth: CGFloat = 448
+    static let menuHeight: CGFloat = 656
 
     static let panelSpring = Animation.spring(response: 0.42, dampingFraction: 0.82)
     static let rowSpring = Animation.spring(response: 0.28, dampingFraction: 0.86)

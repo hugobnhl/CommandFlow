@@ -1,13 +1,16 @@
 import AppKit
 import Combine
+import OSLog
 import SwiftUI
 
 struct PermissionSnapshot: Equatable {
     let accessibilityGranted: Bool
+    let automationPermission: AutomationPermissionSnapshot
     let automationGuidanceAcknowledged: Bool
+    let inputMonitoringGranted: Bool
 
     var onboardingReady: Bool {
-        accessibilityGranted && automationGuidanceAcknowledged
+        accessibilityGranted && (automationPermission.hasAnyGrantedTarget || automationGuidanceAcknowledged)
     }
 }
 
@@ -57,6 +60,12 @@ final class CommandFlowStore: ObservableObject {
         static let preferredMailApp = "CommandFlow.preferredMailApp"
         static let launchAtStartupEnabled = "CommandFlow.launchAtStartupEnabled"
         static let autoCopyColor = "CommandFlow.autoCopyColor"
+        static let keyboardSoundEnabled = "CommandFlow.keyboardSoundEnabled"
+        static let keyboardSoundVolume = "CommandFlow.keyboardSoundVolume"
+        static let focusNoiseMasterVolume = "CommandFlow.focusNoiseMasterVolume"
+        static let focusNoiseTrackVolumes = "CommandFlow.focusNoiseTrackVolumes"
+        static let activeFocusNoiseIDs = "CommandFlow.activeFocusNoiseIDs"
+        static let pauseFocusNoiseWithOtherAudio = "CommandFlow.pauseFocusNoiseWithOtherAudio"
         static let lastUsedActionID = "CommandFlow.lastUsedActionID"
         static let hasPresentedOnboardingOnce = "CommandFlow.hasPresentedOnboardingOnce"
     }
@@ -104,9 +113,29 @@ final class CommandFlowStore: ObservableObject {
             syncLaunchAtStartup()
         }
     }
+    @Published private(set) var keyboardSoundEnabled: Bool {
+        didSet { defaults.set(keyboardSoundEnabled, forKey: DefaultsKey.keyboardSoundEnabled) }
+    }
+    @Published private(set) var keyboardSoundVolume: Double {
+        didSet { defaults.set(keyboardSoundVolume, forKey: DefaultsKey.keyboardSoundVolume) }
+    }
+    @Published private(set) var focusNoiseMasterVolume: Double {
+        didSet { defaults.set(focusNoiseMasterVolume, forKey: DefaultsKey.focusNoiseMasterVolume) }
+    }
+    @Published private(set) var focusNoiseTrackVolumes: [String: Double] {
+        didSet { defaults.set(focusNoiseTrackVolumes, forKey: DefaultsKey.focusNoiseTrackVolumes) }
+    }
+    @Published private(set) var activeFocusNoiseIDs: Set<String> {
+        didSet { defaults.set(Array(activeFocusNoiseIDs).sorted(), forKey: DefaultsKey.activeFocusNoiseIDs) }
+    }
+    @Published var pauseFocusNoiseWithOtherAudio: Bool {
+        didSet { defaults.set(pauseFocusNoiseWithOtherAudio, forKey: DefaultsKey.pauseFocusNoiseWithOtherAudio) }
+    }
     @Published private(set) var availableBrowserPreferences: [BrowserPreference]
     @Published private(set) var availableMailPreferences: [MailPreference]
     @Published private(set) var permissionSnapshot: PermissionSnapshot
+    @Published private(set) var actionTargetContext: FrontmostApplicationContext?
+    @Published private(set) var inputMonitoringRequestPending = false
     @Published private(set) var feedbackBanner: FeedbackBanner?
     @Published private(set) var activeActionID: String?
     @Published private(set) var lastSucceededActionID: String?
@@ -126,12 +155,17 @@ final class CommandFlowStore: ObservableObject {
     }
 
     let allActions = ActionCatalog.all
+    let focusNoiseTracks: [FocusNoiseTrackDescriptor]
 
     private let defaults = UserDefaults.standard
     private let permissionCenter = PermissionCenter()
     private let applicationRouter = ApplicationRouter()
     private let startupManager = LaunchAtStartupManager()
     private let performer: SystemActionPerformer
+    private let logger = Logger(
+        subsystem: Bundle.main.bundleIdentifier ?? "com.hugobrun.commandflow.dev",
+        category: "store"
+    )
 
     private var cancellables = Set<AnyCancellable>()
     private var bannerResetTask: Task<Void, Never>?
@@ -139,6 +173,7 @@ final class CommandFlowStore: ObservableObject {
     private var confirmationResetTask: Task<Void, Never>?
     private var permissionPollingTask: Task<Void, Never>?
     private var suppressLaunchAtStartupSync = false
+    private var pendingKeyboardSoundEnable = false
 
     init() {
         let persistedAutomationAcknowledged = defaults.object(forKey: DefaultsKey.automationGuidanceAcknowledged) as? Bool ?? false
@@ -158,6 +193,23 @@ final class CommandFlowStore: ObservableObject {
         preferredBrowser = BrowserPreference(rawValue: defaults.string(forKey: DefaultsKey.preferredBrowser) ?? "") ?? .systemDefault
         preferredMailApp = MailPreference(rawValue: defaults.string(forKey: DefaultsKey.preferredMailApp) ?? "") ?? .systemDefault
         launchAtStartupEnabled = defaults.object(forKey: DefaultsKey.launchAtStartupEnabled) as? Bool ?? startupManager.isEnabled()
+        keyboardSoundEnabled = defaults.object(forKey: DefaultsKey.keyboardSoundEnabled) as? Bool ?? false
+        keyboardSoundVolume = Self.clampedKeyboardSoundVolume(defaults.object(forKey: DefaultsKey.keyboardSoundVolume) as? Double ?? 0.34)
+        let bundledFocusNoiseTracks = FocusNoiseCatalog.bundledTracks()
+        focusNoiseTracks = bundledFocusNoiseTracks
+        let bundledFocusNoiseTrackIDs = Set(bundledFocusNoiseTracks.map(\.id))
+        let persistedFocusNoiseTrackVolumes = Self.persistedDoubleDictionary(
+            from: defaults.dictionary(forKey: DefaultsKey.focusNoiseTrackVolumes)
+        )
+        focusNoiseTrackVolumes = bundledFocusNoiseTracks.reduce(into: [:]) { volumes, track in
+            volumes[track.id] = Self.clampedFocusNoiseVolume(persistedFocusNoiseTrackVolumes[track.id] ?? 0.62)
+        }
+        activeFocusNoiseIDs = Set(defaults.stringArray(forKey: DefaultsKey.activeFocusNoiseIDs) ?? [])
+            .intersection(bundledFocusNoiseTrackIDs)
+        focusNoiseMasterVolume = Self.clampedFocusNoiseVolume(
+            defaults.object(forKey: DefaultsKey.focusNoiseMasterVolume) as? Double ?? 0.52
+        )
+        pauseFocusNoiseWithOtherAudio = defaults.object(forKey: DefaultsKey.pauseFocusNoiseWithOtherAudio) as? Bool ?? false
         let legacyOnboardingStateExists = defaults.object(forKey: DefaultsKey.didCompleteOnboarding) != nil
             || defaults.object(forKey: DefaultsKey.automationGuidanceAcknowledged) != nil
         hasPresentedOnboardingOnce = defaults.object(forKey: DefaultsKey.hasPresentedOnboardingOnce) as? Bool
@@ -165,14 +217,18 @@ final class CommandFlowStore: ObservableObject {
         availableBrowserPreferences = applicationRouter.availableBrowserPreferences()
         availableMailPreferences = applicationRouter.availableMailPreferences()
         lastUsedActionID = defaults.string(forKey: DefaultsKey.lastUsedActionID)
+        actionTargetContext = nil
         permissionSnapshot = PermissionSnapshot(
             accessibilityGranted: permissionCenter.accessibilityGranted(),
-            automationGuidanceAcknowledged: persistedAutomationAcknowledged
+            automationPermission: permissionCenter.automationPermissionSnapshot(),
+            automationGuidanceAcknowledged: persistedAutomationAcknowledged,
+            inputMonitoringGranted: permissionCenter.inputMonitoringGranted()
         )
         performer = SystemActionPerformer(
             permissionCenter: permissionCenter,
             applicationRouter: applicationRouter
         )
+        inputMonitoringRequestPending = keyboardSoundEnabled && !permissionSnapshot.inputMonitoringGranted
 
         reconcilePreferredApps()
         configureObservers()
@@ -232,6 +288,10 @@ final class CommandFlowStore: ObservableObject {
         density.metrics
     }
 
+    var activeFocusNoiseCount: Int {
+        activeFocusNoiseIDs.count
+    }
+
     var shouldKeepMenuPresented: Bool {
         disableAutoClose || isDragInteractionActive || isDragDropToolActive
     }
@@ -242,6 +302,45 @@ final class CommandFlowStore: ObservableObject {
 
     func isDisabled(_ action: SystemAction) -> Bool {
         disabledIDs.contains(action.id)
+    }
+
+    func isUnavailable(_ action: SystemAction) -> Bool {
+        unavailableReason(for: action) != nil
+    }
+
+    func canPerform(_ action: SystemAction) -> Bool {
+        !isDisabled(action) && !isUnavailable(action)
+    }
+
+    func displayName(for action: SystemAction) -> String {
+        guard action.usesFrontmostApplicationName, let actionTargetContext else {
+            return action.name
+        }
+        return "\(action.name) (\(actionTargetContext.name))"
+    }
+
+    func secondaryLabel(for action: SystemAction) -> String? {
+        if let reason = unavailableReason(for: action) {
+            return reason
+        }
+
+        if let shortcut = action.shortcut?.trimmingCharacters(in: .whitespacesAndNewlines), !shortcut.isEmpty {
+            return shortcut
+        }
+
+        if action.usesFrontmostApplicationName, let actionTargetContext {
+            return "Targets \(actionTargetContext.name)"
+        }
+
+        return nil
+    }
+
+    func captureActionContextBeforePresentation() {
+        var excludedBundleIdentifiers: Set<String> = []
+        if let bundleIdentifier = Bundle.main.bundleIdentifier {
+            excludedBundleIdentifiers.insert(bundleIdentifier)
+        }
+        actionTargetContext = applicationRouter.frontmostApplicationContext(excluding: excludedBundleIdentifiers)
     }
 
     func rowStatus(for action: SystemAction) -> ActionRowStatus {
@@ -296,12 +395,42 @@ final class CommandFlowStore: ObservableObject {
         isDragDropToolActive = active
     }
 
-    func refreshPermissions() {
-        permissionSnapshot = PermissionSnapshot(
+    func refreshPermissions(reason: String = "manual") {
+        let previousSnapshot = permissionSnapshot
+        let wasKeyboardSoundEnabled = keyboardSoundEnabled
+
+        let nextSnapshot = PermissionSnapshot(
             accessibilityGranted: permissionCenter.accessibilityGranted(),
-            automationGuidanceAcknowledged: automationGuidanceAcknowledged
+            automationPermission: permissionCenter.automationPermissionSnapshot(),
+            automationGuidanceAcknowledged: automationGuidanceAcknowledged,
+            inputMonitoringGranted: permissionCenter.inputMonitoringGranted()
         )
+        permissionSnapshot = nextSnapshot
+
+        inputMonitoringRequestPending = keyboardSoundEnabled && !nextSnapshot.inputMonitoringGranted
+
+        if nextSnapshot != previousSnapshot {
+            logger.info(
+                """
+                Permission snapshot changed (\(reason, privacy: .public)): \
+                accessibility=\(nextSnapshot.accessibilityGranted), \
+                automation=\(nextSnapshot.automationPermission.summary.rawValue, privacy: .public), \
+                inputMonitoring=\(nextSnapshot.inputMonitoringGranted)
+                """
+            )
+        } else {
+            logger.debug(
+                """
+                Permission snapshot unchanged (\(reason, privacy: .public)): \
+                accessibility=\(nextSnapshot.accessibilityGranted), \
+                automation=\(nextSnapshot.automationPermission.summary.rawValue, privacy: .public), \
+                inputMonitoring=\(nextSnapshot.inputMonitoringGranted)
+                """
+            )
+        }
+
         refreshAvailableApplications()
+        syncKeyboardSoundPermissionState(previousSnapshot: previousSnapshot, wasEnabled: wasKeyboardSoundEnabled)
     }
 
     func requestAccessibilityPrompt() {
@@ -320,11 +449,59 @@ final class CommandFlowStore: ObservableObject {
     }
 
     func requestAutomationPrompt() {
+        logger.info("Automation request initiated from CommandFlow")
         permissionCenter.requestAutomationPrompt()
+        markAutomationGuidanceAcknowledged()
+        refreshPermissions(reason: "automation_request")
+        startPermissionPolling()
+    }
+
+    func requestInputMonitoringPrompt() {
+        let result = permissionCenter.requestInputMonitoringPrompt()
+        logger.info(
+            """
+            Input monitoring request result: \
+            cgBefore=\(result.cgGrantedBeforeRequest), \
+            hidBefore=\(result.hidAccessBeforeRequest.rawValue, privacy: .public), \
+            cgResult=\(result.cgApiReportedGranted), \
+            hidResult=\(result.hidApiReportedGranted), \
+            tapProbe=\(result.eventTapProbeSucceeded), \
+            after=\(result.isGrantedAfterRequest)
+            """
+        )
+
+        inputMonitoringRequestPending = keyboardSoundEnabled && !result.isGrantedAfterRequest
+        refreshPermissions(reason: "input_monitoring_request")
+
+        if result.isGrantedAfterRequest {
+            if !pendingKeyboardSoundEnable {
+                publishBanner(
+                    style: .success,
+                    title: "Input Monitoring enabled",
+                    detail: "CommandFlow can now listen for global keyboard events."
+                )
+            }
+        } else {
+            permissionCenter.openInputMonitoringSettings()
+            publishBanner(
+                style: .warning,
+                title: "Review Input Monitoring",
+                detail: "macOS has not confirmed access yet. Review Privacy & Security > Input Monitoring, then refresh."
+            )
+        }
+
+        startPermissionPolling()
+    }
+
+    func openInputMonitoringSettings() {
+        permissionCenter.openInputMonitoringSettings()
         startPermissionPolling()
     }
 
     func markAutomationGuidanceAcknowledged() {
+        guard !automationGuidanceAcknowledged else {
+            return
+        }
         automationGuidanceAcknowledged = true
     }
 
@@ -357,8 +534,151 @@ final class CommandFlowStore: ObservableObject {
         launchAtStartupEnabled = enabled
     }
 
+    func setKeyboardSoundEnabled(_ enabled: Bool) {
+        let wasEnabled = keyboardSoundEnabled
+
+        if enabled {
+            if !wasEnabled {
+                keyboardSoundEnabled = true
+            }
+
+            guard permissionSnapshot.inputMonitoringGranted else {
+                pendingKeyboardSoundEnable = true
+                inputMonitoringRequestPending = true
+                requestInputMonitoringPrompt()
+                return
+            }
+
+            pendingKeyboardSoundEnable = false
+            inputMonitoringRequestPending = false
+
+            if !wasEnabled {
+                publishBanner(
+                    style: .success,
+                    title: "Keyboard sound enabled",
+                    detail: "Mechanical feedback is ready."
+                )
+            }
+            return
+        }
+
+        pendingKeyboardSoundEnable = false
+        inputMonitoringRequestPending = false
+        guard keyboardSoundEnabled else {
+            return
+        }
+
+        keyboardSoundEnabled = false
+        publishBanner(
+            style: .success,
+            title: "Keyboard sound disabled",
+            detail: "Mechanical feedback is off."
+        )
+    }
+
+    func setKeyboardSoundVolume(_ value: Double) {
+        let clampedValue = Self.clampedKeyboardSoundVolume(value)
+        guard abs(clampedValue - keyboardSoundVolume) > 0.0001 else {
+            return
+        }
+        keyboardSoundVolume = clampedValue
+    }
+
+    func isFocusNoiseEnabled(_ trackID: String) -> Bool {
+        activeFocusNoiseIDs.contains(trackID)
+    }
+
+    func focusNoiseVolume(for trackID: String) -> Double {
+        focusNoiseTrackVolumes[trackID] ?? 0.62
+    }
+
+    func setFocusNoiseEnabled(_ enabled: Bool, for trackID: String) {
+        guard focusNoiseTracks.contains(where: { $0.id == trackID }) else {
+            return
+        }
+
+        var nextActiveTrackIDs = activeFocusNoiseIDs
+        if enabled {
+            nextActiveTrackIDs.insert(trackID)
+        } else {
+            nextActiveTrackIDs.remove(trackID)
+        }
+
+        guard nextActiveTrackIDs != activeFocusNoiseIDs else {
+            return
+        }
+
+        activeFocusNoiseIDs = nextActiveTrackIDs
+    }
+
+    func toggleFocusNoise(for trackID: String) {
+        setFocusNoiseEnabled(!isFocusNoiseEnabled(trackID), for: trackID)
+    }
+
+    func setFocusNoiseTrackVolume(_ value: Double, for trackID: String) {
+        guard focusNoiseTrackVolumes[trackID] != nil else {
+            return
+        }
+
+        let clampedValue = Self.clampedFocusNoiseVolume(value)
+        guard abs((focusNoiseTrackVolumes[trackID] ?? clampedValue) - clampedValue) > 0.0001 else {
+            return
+        }
+
+        var nextVolumes = focusNoiseTrackVolumes
+        nextVolumes[trackID] = clampedValue
+        focusNoiseTrackVolumes = nextVolumes
+    }
+
+    func setFocusNoiseMasterVolume(_ value: Double) {
+        let clampedValue = Self.clampedFocusNoiseVolume(value)
+        guard abs(clampedValue - focusNoiseMasterVolume) > 0.0001 else {
+            return
+        }
+
+        focusNoiseMasterVolume = clampedValue
+    }
+
+    func setPauseFocusNoiseWithOtherAudio(_ enabled: Bool) {
+        guard pauseFocusNoiseWithOtherAudio != enabled else {
+            return
+        }
+
+        pauseFocusNoiseWithOtherAudio = enabled
+    }
+
+    func stopAllFocusNoise() {
+        guard !activeFocusNoiseIDs.isEmpty else {
+            return
+        }
+
+        activeFocusNoiseIDs = []
+        publishBanner(
+            style: .success,
+            title: "Focus noise stopped",
+            detail: "All ambient layers are off."
+        )
+    }
+
+    func updateKeyboardSoundPermissions() {
+        refreshPermissions(reason: "keyboard_sound_update")
+    }
+
     func perform(_ action: SystemAction) {
         guard !isDisabled(action) else {
+            return
+        }
+
+        if let reason = unavailableReason(for: action) {
+            activeActionID = nil
+            lastFailedActionID = action.id
+            lastSucceededActionID = nil
+            publishBanner(
+                style: .warning,
+                title: "\(displayName(for: action)) isn’t available",
+                detail: reason
+            )
+            scheduleRowStateReset()
             return
         }
 
@@ -366,7 +686,7 @@ final class CommandFlowStore: ObservableObject {
             pendingConfirmationActionID = action.id
             publishBanner(
                 style: .warning,
-                title: "Confirm \(action.name)",
+                title: "Confirm \(displayName(for: action))",
                 detail: "Press the action again to continue."
             )
             scheduleConfirmationReset()
@@ -382,6 +702,7 @@ final class CommandFlowStore: ObservableObject {
             preferredBrowser: preferredBrowser,
             preferredMailApp: preferredMailApp
         )
+        let actionTargetContext = actionTargetContext
 
         Task { [weak self] in
             guard let self else {
@@ -389,7 +710,11 @@ final class CommandFlowStore: ObservableObject {
             }
 
             do {
-                let outcome = try await performer.execute(action, preferences: preferences)
+                let outcome = try await performer.execute(
+                    action,
+                    preferences: preferences,
+                    frontmostApplicationContext: actionTargetContext
+                )
                 handleExecutionSuccess(outcome, for: action)
             } catch let error as ActionExecutionError {
                 handleExecutionFailure(error, for: action)
@@ -559,12 +884,89 @@ final class CommandFlowStore: ObservableObject {
                 await MainActor.run {
                     self.refreshPermissions()
                 }
-
-                if await MainActor.run(body: { self.permissionSnapshot.accessibilityGranted }) {
-                    break
-                }
             }
         }
+    }
+
+    private func syncKeyboardSoundPermissionState(previousSnapshot: PermissionSnapshot, wasEnabled: Bool) {
+        if pendingKeyboardSoundEnable, permissionSnapshot.inputMonitoringGranted {
+            pendingKeyboardSoundEnable = false
+            publishBanner(
+                style: .success,
+                title: "Keyboard sound ready",
+                detail: "Mechanical feedback is active."
+            )
+            return
+        }
+
+        if previousSnapshot.inputMonitoringGranted && !permissionSnapshot.inputMonitoringGranted && wasEnabled {
+            inputMonitoringRequestPending = true
+            publishBanner(
+                style: .warning,
+                title: "Keyboard sound is waiting",
+                detail: "Input Monitoring is no longer granted, so playback is paused until macOS allows it again."
+            )
+        }
+    }
+
+    private static func clampedKeyboardSoundVolume(_ value: Double) -> Double {
+        min(max(value, 0), 1)
+    }
+
+    private static func clampedFocusNoiseVolume(_ value: Double) -> Double {
+        min(max(value, 0), 1)
+    }
+
+    private static func persistedDoubleDictionary(from dictionary: [String: Any]?) -> [String: Double] {
+        guard let dictionary else {
+            return [:]
+        }
+
+        return dictionary.reduce(into: [:]) { result, entry in
+            switch entry.value {
+            case let value as Double:
+                result[entry.key] = value
+            case let value as NSNumber:
+                result[entry.key] = value.doubleValue
+            default:
+                break
+            }
+        }
+    }
+
+    private func unavailableReason(for action: SystemAction) -> String? {
+        if case let .openApplication(bundleID) = action.transport, !applicationRouter.isInstalled(bundleID: bundleID) {
+            return "This app is not installed on your Mac."
+        }
+
+        if action.permissionRequirement == .accessibility, !permissionSnapshot.accessibilityGranted {
+            return "Enable Accessibility in Settings first."
+        }
+
+        if let automationTargetBundleIdentifier = action.automationTargetBundleIdentifier {
+            let state: AutomationTargetPermissionState = switch automationTargetBundleIdentifier {
+            case "com.apple.finder":
+                permissionSnapshot.automationPermission.finder
+            case "com.apple.systemevents":
+                permissionSnapshot.automationPermission.systemEvents
+            default:
+                .unknown(0)
+            }
+
+            if case .denied = state {
+                return "Review Automation permission for this action."
+            }
+        }
+
+        if action.requiresFrontmostApplicationContext, actionTargetContext == nil {
+            return "Open another app first, then reopen CommandFlow."
+        }
+
+        if action.requiresBrowserLikeApplication, actionTargetContext?.isBrowserLike != true {
+            return "Open a browser first, then reopen CommandFlow."
+        }
+
+        return nil
     }
 
     private func handleExecutionSuccess(_ outcome: ActionExecutionOutcome, for action: SystemAction) {
@@ -597,12 +999,12 @@ final class CommandFlowStore: ObservableObject {
         case .missingPermission(.accessibility):
             detail = "Enable Accessibility to unlock keyboard-driven actions."
         case .missingPermission(.automation):
-            detail = "Allow automation for CommandFlow in Privacy & Security."
+            detail = "Review Finder and System Events under Privacy & Security > Automation."
         default:
             detail = error.errorDescription ?? "The action could not complete."
         }
 
-        publishBanner(style: .error, title: "Couldn’t run \(action.name)", detail: detail)
+        publishBanner(style: .error, title: "Couldn’t run \(displayName(for: action))", detail: detail)
         scheduleRowStateReset()
     }
 }

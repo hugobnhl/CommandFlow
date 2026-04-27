@@ -18,10 +18,12 @@ struct ClipboardHistoryItem: Identifiable, Codable, Hashable {
 final class ClipboardHistoryStore: ObservableObject {
     private enum DefaultsKey {
         static let history = "CommandFlow.clipboardHistory"
+        static let persistHistory = "CommandFlow.clipboardPersistHistory"
     }
 
     @Published private(set) var items: [ClipboardHistoryItem] = []
     @Published private(set) var lastCopiedItemID: ClipboardHistoryItem.ID?
+    @Published private(set) var isPersistedOnDisk: Bool
 
     let limit: Int
 
@@ -34,7 +36,8 @@ final class ClipboardHistoryStore: ObservableObject {
     init(limit: Int = 20) {
         self.limit = limit
         self.lastChangeCount = pasteboard.changeCount
-        self.items = loadPersistedItems()
+        self.isPersistedOnDisk = defaults.object(forKey: DefaultsKey.persistHistory) as? Bool ?? true
+        self.items = Self.loadPersistedItems(from: defaults, limit: limit, persistedOnDisk: isPersistedOnDisk)
         seedFromCurrentClipboard()
         startMonitoring()
     }
@@ -64,6 +67,21 @@ final class ClipboardHistoryStore: ObservableObject {
     func clear() {
         items.removeAll()
         persistItems()
+    }
+
+    func setPersistenceEnabled(_ enabled: Bool) {
+        guard isPersistedOnDisk != enabled else {
+            return
+        }
+
+        isPersistedOnDisk = enabled
+        defaults.set(enabled, forKey: DefaultsKey.persistHistory)
+
+        if enabled {
+            persistItems()
+        } else {
+            defaults.removeObject(forKey: DefaultsKey.history)
+        }
     }
 
     private func startMonitoring() {
@@ -116,14 +134,20 @@ final class ClipboardHistoryStore: ObservableObject {
     }
 
     private func persistItems() {
+        guard isPersistedOnDisk else {
+            defaults.removeObject(forKey: DefaultsKey.history)
+            return
+        }
+
         guard let data = try? JSONEncoder().encode(items) else {
             return
         }
         defaults.set(data, forKey: DefaultsKey.history)
     }
 
-    private func loadPersistedItems() -> [ClipboardHistoryItem] {
-        guard let data = defaults.data(forKey: DefaultsKey.history),
+    private static func loadPersistedItems(from defaults: UserDefaults, limit: Int, persistedOnDisk: Bool) -> [ClipboardHistoryItem] {
+        guard persistedOnDisk,
+              let data = defaults.data(forKey: DefaultsKey.history),
               let items = try? JSONDecoder().decode([ClipboardHistoryItem].self, from: data) else {
             return []
         }

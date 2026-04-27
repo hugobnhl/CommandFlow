@@ -8,9 +8,10 @@ final class QuickNoteStore: ObservableObject {
 
     @Published private(set) var notes: [QuickNoteItem]
 
-    private let defaults = UserDefaults.standard
+    private let defaults: UserDefaults
 
-    init() {
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
         notes = Self.loadNotes(from: defaults)
     }
 
@@ -29,7 +30,12 @@ final class QuickNoteStore: ObservableObject {
             return
         }
 
-        notes[index].text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return
+        }
+
+        notes[index].text = trimmed
         notes[index].updatedAt = .now
         persist()
     }

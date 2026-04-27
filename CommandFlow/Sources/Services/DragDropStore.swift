@@ -30,10 +30,12 @@ final class DragDropStore: ObservableObject {
     @Published private(set) var items: [DroppedFileItem]
     @Published private(set) var isInteractionActive = false
 
-    private let defaults = UserDefaults.standard
+    private let defaults: UserDefaults
     private let maximumItems = 10
+    private let quickLookPreviewManager = QuickLookPreviewManager.shared
 
-    init() {
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
         if let storedData = defaults.data(forKey: DefaultsKey.droppedItems),
            let decodedItems = try? JSONDecoder().decode([DroppedFileItem].self, from: storedData) {
             items = decodedItems.filter { FileManager.default.fileExists(atPath: $0.path) }
@@ -78,54 +80,85 @@ final class DragDropStore: ObservableObject {
     }
 
     func remove(_ item: DroppedFileItem) {
-        items.removeAll { $0.id == item.id }
+        remove([item])
+    }
+
+    func remove(_ itemsToRemove: [DroppedFileItem]) {
+        let removalIDs = Set(itemsToRemove.map(\.id))
+        guard !removalIDs.isEmpty else {
+            return
+        }
+
+        items.removeAll { removalIDs.contains($0.id) }
         latestDroppedFilePath = items.last?.path
         persistItems()
     }
 
     @discardableResult
     func copyFilePath(for item: DroppedFileItem?) -> Bool {
-        guard let path = resolvedItem(item)?.path else {
+        copyFilePaths(for: item.map { [$0] } ?? [])
+    }
+
+    @discardableResult
+    func copyFilePaths(for itemsToCopy: [DroppedFileItem]) -> Bool {
+        let resolved = resolvedItems(itemsToCopy)
+        guard !resolved.isEmpty else {
             return false
         }
 
+        let value = resolved.map(\.path).joined(separator: "\n")
         NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(path, forType: .string)
+        NSPasteboard.general.setString(value, forType: .string)
         return true
     }
 
     @discardableResult
     func revealFile(_ item: DroppedFileItem?) -> Bool {
-        guard let latestDroppedFileURL = resolvedItem(item)?.url else {
+        revealFiles(item.map { [$0] } ?? [])
+    }
+
+    @discardableResult
+    func revealFiles(_ itemsToReveal: [DroppedFileItem]) -> Bool {
+        let urls = resolvedItems(itemsToReveal).map(\.url)
+        guard !urls.isEmpty else {
             return false
         }
 
-        NSWorkspace.shared.activateFileViewerSelecting([latestDroppedFileURL])
+        NSWorkspace.shared.activateFileViewerSelecting(urls)
         return true
     }
 
     @discardableResult
     func openFile(_ item: DroppedFileItem?) -> Bool {
-        guard let latestDroppedFileURL = resolvedItem(item)?.url else {
+        openFiles(item.map { [$0] } ?? [])
+    }
+
+    @discardableResult
+    func openFiles(_ itemsToOpen: [DroppedFileItem]) -> Bool {
+        let urls = resolvedItems(itemsToOpen).map(\.url)
+        guard !urls.isEmpty else {
             return false
         }
 
-        return NSWorkspace.shared.open(latestDroppedFileURL)
+        return urls.reduce(into: true) { result, url in
+            result = NSWorkspace.shared.open(url) && result
+        }
     }
 
     @discardableResult
     func previewFile(_ item: DroppedFileItem?) -> Bool {
-        guard let latestDroppedFileURL = resolvedItem(item)?.url else {
+        previewFiles(item.map { [$0] } ?? [])
+    }
+
+    @discardableResult
+    func previewFiles(_ itemsToPreview: [DroppedFileItem]) -> Bool {
+        let urls = resolvedItems(itemsToPreview).map(\.url)
+        guard !urls.isEmpty else {
             return false
         }
 
-        if let previewURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.Preview") {
-            let configuration = NSWorkspace.OpenConfiguration()
-            NSWorkspace.shared.open([latestDroppedFileURL], withApplicationAt: previewURL, configuration: configuration, completionHandler: nil)
-            return true
-        }
-
-        return NSWorkspace.shared.open(latestDroppedFileURL)
+        quickLookPreviewManager.present(items: urls)
+        return true
     }
 
     @discardableResult
@@ -157,6 +190,19 @@ final class DragDropStore: ObservableObject {
             return nil
         }
         return items.last(where: { $0.path == latestDroppedFilePath }) ?? items.last
+    }
+
+    private func resolvedItems(_ itemsToResolve: [DroppedFileItem]) -> [DroppedFileItem] {
+        if !itemsToResolve.isEmpty {
+            let ids = Set(itemsToResolve.map(\.id))
+            return items.filter { ids.contains($0.id) }
+        }
+
+        guard let latest = resolvedItem(nil) else {
+            return []
+        }
+
+        return [latest]
     }
 
     private func persistItems() {

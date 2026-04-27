@@ -40,9 +40,19 @@ struct SystemActionPerformer: Sendable {
         self.applicationRouter = applicationRouter
     }
 
-    func execute(_ action: SystemAction, preferences: ActionExecutionPreferences) async throws -> ActionExecutionOutcome {
+    func execute(
+        _ action: SystemAction,
+        preferences: ActionExecutionPreferences,
+        frontmostApplicationContext: FrontmostApplicationContext?
+    ) async throws -> ActionExecutionOutcome {
         if action.permissionRequirement == .accessibility, !permissionCenter.accessibilityGranted() {
             throw ActionExecutionError.missingPermission(.accessibility)
+        }
+
+        if action.shouldRestoreFrontmostApplicationBeforeExecution,
+           let frontmostApplicationContext {
+            try await applicationRouter.activateRunningApplication(bundleID: frontmostApplicationContext.bundleIdentifier)
+            try? await Task.sleep(for: .milliseconds(90))
         }
 
         switch action.transport {
@@ -60,7 +70,13 @@ struct SystemActionPerformer: Sendable {
             try await applicationRouter.openMail(preference: preferences.preferredMailApp)
         }
 
-        return ActionExecutionOutcome(title: action.name, detail: action.successMessage)
+        let title = if action.usesFrontmostApplicationName, let frontmostApplicationContext {
+            "\(action.name) (\(frontmostApplicationContext.name))"
+        } else {
+            action.name
+        }
+
+        return ActionExecutionOutcome(title: title, detail: action.successMessage)
     }
 
     @MainActor

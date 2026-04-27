@@ -4,6 +4,51 @@ struct OnboardingView: View {
     @ObservedObject var store: CommandFlowStore
     let onDismiss: () -> Void
 
+    private var automationSummary: AutomationPermissionSummary {
+        store.permissionSnapshot.automationPermission.summary
+    }
+
+    private var automationStateLabel: String {
+        switch automationSummary {
+        case .granted:
+            return "Enabled"
+        case .partiallyGranted:
+            return "Review"
+        case .requiresConsent:
+            return "Required"
+        case .denied:
+            return "Open Privacy"
+        case .unknown:
+            return "Review"
+        }
+    }
+
+    private var automationDetail: String {
+        switch automationSummary {
+        case .granted:
+            return "Finder and System Events automation are already available."
+        case .partiallyGranted:
+            return "At least one automation target already works. CommandFlow can request the remaining target the next time it is needed."
+        case .requiresConsent:
+            return "Ask once for Finder or System Events automation so CommandFlow appears in Privacy & Security > Automation."
+        case .denied:
+            return "Automation was denied for at least one target. Open Privacy & Security > Automation to review it."
+        case .unknown:
+            return "Automation could not be fully verified. If it already works, macOS may simply not be exposing one target right now."
+        }
+    }
+
+    private var automationPrimaryActionTitle: String {
+        switch automationSummary {
+        case .granted, .denied:
+            return "Open Privacy"
+        case .partiallyGranted:
+            return "Request Again"
+        case .requiresConsent, .unknown:
+            return "Request Access"
+        }
+    }
+
     var body: some View {
         ZStack {
             LiquidGlassBackdrop()
@@ -30,13 +75,16 @@ struct OnboardingView: View {
 
                 stepCard(
                     title: "Automation",
-                    detail: "Ask once for Finder automation so CommandFlow appears in Privacy & Security > Automation.",
-                    stateLabel: store.automationGuidanceAcknowledged ? "Ready" : "Review",
-                    isComplete: store.automationGuidanceAcknowledged,
-                    primaryActionTitle: store.automationGuidanceAcknowledged ? "Request Again" : "Request Access",
+                    detail: automationDetail,
+                    stateLabel: automationStateLabel,
+                    isComplete: store.permissionSnapshot.automationPermission.hasAnyGrantedTarget || store.automationGuidanceAcknowledged,
+                    primaryActionTitle: automationPrimaryActionTitle,
                     primaryAction: {
-                        store.requestAutomationPrompt()
-                        store.markAutomationGuidanceAcknowledged()
+                        if automationSummary == .granted || automationSummary == .denied {
+                            store.openAutomationSettings()
+                        } else {
+                            store.requestAutomationPrompt()
+                        }
                     },
                     secondaryActionTitle: "Open Privacy",
                     secondaryAction: store.openAutomationSettings
@@ -47,7 +95,11 @@ struct OnboardingView: View {
                         Text("Ready When You Are")
                             .font(.system(size: 15.5, weight: .semibold))
 
-                        Text("Use Refresh Permissions after changing access in System Settings. Refusing a prompt does not revoke an already-approved accessibility entry.")
+                        Text("Use Refresh Permissions after changing access in System Settings. macOS permissions are capricious, so if a prompt disappears or a pane does not update, open the privacy pane by hand, keep it open, relaunch the app if needed, and then refresh again.")
+                            .font(.system(size: 12.5, weight: .medium))
+                            .foregroundStyle(.secondary)
+
+                        Text("Refusing a prompt does not revoke an already-approved accessibility entry.")
                             .font(.system(size: 12.5, weight: .medium))
                             .foregroundStyle(.secondary)
 

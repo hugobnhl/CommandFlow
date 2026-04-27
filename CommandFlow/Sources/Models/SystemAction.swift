@@ -46,6 +46,132 @@ struct SystemAction: Identifiable, Hashable, Sendable {
     }
 }
 
+extension SystemAction {
+    var usesFrontmostApplicationName: Bool {
+        let ids: Set<String> = [
+            "hide-front-app",
+            "switch-window",
+            "quit-app",
+            "app-preferences",
+            "close-window",
+            "copy",
+            "paste",
+            "cut",
+            "undo",
+            "redo",
+            "select-all",
+            "find",
+            "replace",
+            "bold",
+            "italic",
+            "underline",
+            "new-tab",
+            "reload",
+            "back",
+            "forward",
+            "focus-url",
+            "full-screen",
+            "minimize",
+            "minimize-all",
+            "zoom-in",
+            "zoom-out",
+        ]
+        return ids.contains(id)
+    }
+
+    var requiresFrontmostApplicationContext: Bool {
+        let ids: Set<String> = [
+            "hide-front-app",
+            "switch-window",
+            "quit-app",
+            "app-preferences",
+            "close-window",
+            "copy",
+            "paste",
+            "cut",
+            "undo",
+            "redo",
+            "select-all",
+            "find",
+            "replace",
+            "bold",
+            "italic",
+            "underline",
+            "new-tab",
+            "reload",
+            "back",
+            "forward",
+            "focus-url",
+            "full-screen",
+            "minimize",
+            "minimize-all",
+            "zoom-in",
+            "zoom-out",
+        ]
+        return ids.contains(id)
+    }
+
+    var requiresBrowserLikeApplication: Bool {
+        let ids: Set<String> = [
+            "new-tab",
+            "reload",
+            "back",
+            "forward",
+            "focus-url",
+        ]
+        return ids.contains(id)
+    }
+
+    var shouldRestoreFrontmostApplicationBeforeExecution: Bool {
+        let ids: Set<String> = [
+            "screenshot",
+            "screenshot-full",
+            "screenshot-selection",
+            "spotlight",
+            "switch-app",
+            "switch-window",
+            "force-quit",
+            "hide-front-app",
+            "quit-app",
+            "app-preferences",
+            "close-window",
+            "copy",
+            "paste",
+            "cut",
+            "undo",
+            "redo",
+            "select-all",
+            "find",
+            "replace",
+            "bold",
+            "italic",
+            "underline",
+            "new-tab",
+            "reload",
+            "back",
+            "forward",
+            "focus-url",
+            "full-screen",
+            "minimize",
+            "minimize-all",
+            "zoom-in",
+            "zoom-out",
+        ]
+        return ids.contains(id)
+    }
+
+    var automationTargetBundleIdentifier: String? {
+        switch id {
+        case "empty-trash":
+            return "com.apple.finder"
+        case "toggle-dark-mode":
+            return "com.apple.systemevents"
+        default:
+            return nil
+        }
+    }
+}
+
 private enum ActionScriptFactory {
     static func systemEventsKeystroke(_ key: String, modifiers: [String] = []) -> String {
         """
@@ -254,8 +380,8 @@ enum ActionCatalog {
             shortcut: "⇧⌘5",
             category: .workspace,
             keywords: ["capture", "screen", "record", "screenshot tool"],
-            transport: .appleScript(ActionScriptFactory.systemEventsKeystroke("5", modifiers: ["shift down", "command down"])),
-            permissionRequirement: .accessibility,
+            transport: .openApplication(bundleID: "com.apple.screenshot.launcher"),
+            permissionRequirement: nil,
             requiresConfirmation: false,
             isRecommended: false
         ),
@@ -804,28 +930,28 @@ enum ActionCatalog {
         SystemAction(
             id: "screenshot-full",
             name: "Screenshot Full",
-            detail: "Capture the full screen.",
-            successMessage: "Full screen capture triggered.",
+            detail: "Capture the full screen to your Desktop.",
+            successMessage: "Full screen capture started.",
             systemImage: "rectangle.on.rectangle",
             shortcut: "⇧⌘3",
             category: .system,
             keywords: ["screenshot", "screen", "capture"],
-            transport: .appleScript(ActionScriptFactory.systemEventsKeystroke("3", modifiers: ["shift down", "command down"])),
-            permissionRequirement: .accessibility,
+            transport: .shell("/usr/sbin/screencapture -x \"$HOME/Desktop/CommandFlow-$(date +%Y%m%d-%H%M%S).png\""),
+            permissionRequirement: nil,
             requiresConfirmation: false,
             isRecommended: false
         ),
         SystemAction(
             id: "screenshot-selection",
             name: "Screenshot Selection",
-            detail: "Capture a selected region.",
-            successMessage: "Selection capture triggered.",
+            detail: "Capture a selected region to your Desktop.",
+            successMessage: "Selection capture started.",
             systemImage: "selection.pin.in.out",
             shortcut: "⇧⌘4",
             category: .system,
             keywords: ["screenshot", "selection", "capture"],
-            transport: .appleScript(ActionScriptFactory.systemEventsKeystroke("4", modifiers: ["shift down", "command down"])),
-            permissionRequirement: .accessibility,
+            transport: .shell("/usr/sbin/screencapture -i \"$HOME/Desktop/CommandFlow-$(date +%Y%m%d-%H%M%S).png\""),
+            permissionRequirement: nil,
             requiresConfirmation: false,
             isRecommended: false
         ),

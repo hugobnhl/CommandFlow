@@ -10,6 +10,13 @@ final class CommandFlowAppModel {
     let savedURLStore = SavedURLStore()
     let quickNoteStore = QuickNoteStore()
     let dragDropStore = DragDropStore()
+    let updateService = AppUpdateService()
+    let keyboardSoundService = KeyboardSoundService()
+    let focusNoiseService = FocusNoiseService()
+
+    private lazy var keyboardInputMonitor = KeyboardInputMonitor { [weak self] event in
+        self?.keyboardSoundService.handle(event)
+    }
 
     private lazy var panelController = MenuBarPanelController(
         store: store,
@@ -25,7 +32,9 @@ final class CommandFlowAppModel {
                     savedURLStore: savedURLStore,
                     quickNoteStore: quickNoteStore,
                     dragDropStore: dragDropStore,
+                    updateService: updateService,
                     onOpenSettings: { [weak self] in self?.showSettings() },
+                    onRelaunchApplication: { [weak self] in self?.relaunchApplication() },
                     onOpenOnboarding: { [weak self] in self?.presentOnboarding() },
                     onDismissMenu: { [weak self] in self?.dismissMenu() }
                 )
@@ -67,6 +76,61 @@ final class CommandFlowAppModel {
                 self?.dragDropStore.setInteractionActive(active)
             }
             .store(in: &cancellables)
+
+        store.$keyboardSoundVolume
+            .receive(on: RunLoop.main)
+            .sink { [weak self] volume in
+                self?.keyboardSoundService.setVolume(volume)
+            }
+            .store(in: &cancellables)
+
+        store.$keyboardSoundEnabled
+            .combineLatest(
+                store.$permissionSnapshot
+                    .map(\.inputMonitoringGranted)
+            )
+            .receive(on: RunLoop.main)
+            .sink { [weak self] isEnabled, inputMonitoringGranted in
+                self?.keyboardSoundService.setEnabled(isEnabled && inputMonitoringGranted)
+            }
+            .store(in: &cancellables)
+
+        store.$keyboardSoundEnabled
+            .combineLatest(
+                store.$permissionSnapshot.map(\.inputMonitoringGranted),
+                store.$inputMonitoringRequestPending
+            )
+            .receive(on: RunLoop.main)
+            .sink { [weak self] isEnabled, inputMonitoringGranted, inputMonitoringRequestPending in
+                let shouldMonitor = isEnabled && (inputMonitoringGranted || inputMonitoringRequestPending)
+                self?.keyboardInputMonitor.setEnabled(shouldMonitor)
+            }
+            .store(in: &cancellables)
+
+        store.$activeFocusNoiseIDs
+            .combineLatest(
+                store.$focusNoiseTrackVolumes,
+                store.$focusNoiseMasterVolume,
+                store.$pauseFocusNoiseWithOtherAudio
+            )
+            .receive(on: RunLoop.main)
+            .sink { [weak self] activeTrackIDs, trackVolumes, masterVolume, pauseWhenOtherAudioPlays in
+                self?.focusNoiseService.apply(
+                    activeTrackIDs: activeTrackIDs,
+                    trackVolumes: trackVolumes,
+                    masterVolume: masterVolume,
+                    pauseWhenOtherAudioPlays: pauseWhenOtherAudioPlays
+                )
+            }
+            .store(in: &cancellables)
+
+        keyboardSoundService.setVolume(store.keyboardSoundVolume)
+        focusNoiseService.apply(
+            activeTrackIDs: store.activeFocusNoiseIDs,
+            trackVolumes: store.focusNoiseTrackVolumes,
+            masterVolume: store.focusNoiseMasterVolume,
+            pauseWhenOtherAudioPlays: store.pauseFocusNoiseWithOtherAudio
+        )
     }
 
     func start() {
@@ -74,6 +138,10 @@ final class CommandFlowAppModel {
 
         if store.shouldShowSetupPrompt {
             presentOnboarding()
+        }
+
+        Task {
+            await updateService.performAutomaticCheckIfNeeded()
         }
     }
 
@@ -83,6 +151,7 @@ final class CommandFlowAppModel {
             clipboardStore: clipboardHistoryStore,
             savedURLStore: savedURLStore,
             quickNoteStore: quickNoteStore,
+            updateService: updateService,
             showOnboarding: { [weak self] in
                 self?.presentOnboarding(manual: true)
             }
@@ -99,13 +168,15 @@ final class CommandFlowAppModel {
             window.title = "CommandFlow Settings"
             window.identifier = NSUserInterfaceItemIdentifier("CommandFlowSettingsWindow")
             window.isReleasedWhenClosed = false
-            window.styleMask = [.titled, .closable, .miniaturizable, .fullSizeContentView]
+            window.styleMask = [.titled, .closable, .miniaturizable]
             window.titleVisibility = .hidden
             window.titlebarAppearsTransparent = true
             window.backgroundColor = .clear
             window.isOpaque = false
             window.hasShadow = true
-            window.setContentSize(NSSize(width: 620, height: 760))
+            window.toolbarStyle = .unifiedCompact
+            window.setContentSize(NSSize(width: 680, height: 820))
+            window.minSize = NSSize(width: 640, height: 760)
             window.center()
             settingsWindowController = NSWindowController(window: window)
             logger.info("Created settings window controller")
@@ -136,12 +207,13 @@ final class CommandFlowAppModel {
             let window = NSWindow(contentViewController: hostingController)
             window.title = "CommandFlow Setup"
             window.isReleasedWhenClosed = false
-            window.styleMask = [.titled, .closable, .fullSizeContentView]
+            window.styleMask = [.titled, .closable]
             window.titleVisibility = .hidden
             window.titlebarAppearsTransparent = true
             window.backgroundColor = .clear
             window.isOpaque = false
             window.hasShadow = true
+            window.toolbarStyle = .unifiedCompact
             window.setContentSize(NSSize(width: 490, height: 590))
             window.center()
             onboardingWindowController = NSWindowController(window: window)
@@ -216,6 +288,7 @@ final class MenuBarPanelController: NSObject, NSWindowDelegate {
 
     private func openPanel() {
         let panel = makePanelIfNeeded()
+        store.captureActionContextBeforePresentation()
         if store.attachToMenuBar || detachedOrigin == nil {
             positionPanel(animated: false)
         } else if let detachedOrigin {
